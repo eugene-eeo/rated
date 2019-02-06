@@ -30,14 +30,22 @@ class Frontend:
 
     @Pyro4.expose
     def get_ratings(self, user_id):
-        rating, time = self.replica.get_ratings(user_id, self.time)
-        self.time = vector_clock.merge(time, self.time)
-        return rating
+        with self.replica as replica:
+            rating, time = replica.get_ratings(user_id, self.time)
+            self.time = vector_clock.merge(time, self.time)
+            return rating
 
     @Pyro4.expose
     def add_rating(self, user_id, movie_id, value):
-        time = self.replica.add_rating(user_id, movie_id, value, self.time)
-        self.time = vector_clock.merge(time, self.time)
+        with self.replica as replica:
+            replica.add_rating(user_id, movie_id, value)
+
+    @Pyro4.expose
+    def add_rating_strict(self, user_id, movie_id, value):
+        with self.replica as replica:
+            replica.get_ratings(user_id, self.time)
+            t = replica.add_rating(user_id, movie_id, value)
+            self.time = vector_clock.merge(t, self.time)
 
 
 ns = Pyro4.locateNS()

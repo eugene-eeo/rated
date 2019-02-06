@@ -2,7 +2,7 @@ import time
 from functools import cmp_to_key
 
 
-def compare(p1, p2):
+def compare(p1, p2, strict=True):
     v1, t1 = p1
     v2, t2 = p2
     lt = False
@@ -14,7 +14,10 @@ def compare(p1, p2):
         gt |= a > b
         if lt and gt:
             break
-    if not (lt ^ gt):
+    # strict = force global ordering
+    if not (lt ^ gt) and strict:
+        # if lt and gt both = True or False, then compare
+        # by timestamp instead
         return (t1 > t2) - (t1 < t2)
     return int(gt) - int(lt)
 

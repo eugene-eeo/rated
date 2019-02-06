@@ -1,10 +1,12 @@
 import time
 import random
 import threading
+from contextlib import contextmanager
+from itertools import islice
+from uuid import uuid4
+
 import Pyro4
 import vector_clock
-from uuid import uuid4
-from contextlib import contextmanager
 from models import Update, json_to_op
 
 
@@ -21,11 +23,17 @@ def merge(a, b):
             continue
         c = vector_clock.compare(x[0], y[0])
         if c == -1: yield x; i += 1  # x < y
-        if c ==  1: yield y; j += 1  # x > y
-        if c ==  0: yield y; j += 1
+        if c == 1: yield y; j += 1   # x > y
+        # we never have duplicate events here because otherwise
+        # previous if statement would handle it
+        if c == 0:
+            yield x
+            yield y
+            i += 1
+            j += 1
     # one of the sequences must be empty
-    yield from a[i:]
-    yield from b[j:]
+    yield from islice(a, i, None)
+    yield from islice(b, j, None)
 
 
 class Replica:
@@ -36,9 +44,9 @@ class Replica:
         self.time = vector_clock.create()
         self.ratings = {}
         self.updates = []
-        self.sync_period = 0.25  # seconds until next sync
+        self.sync_period = 1  # seconds until next sync
 
-    def active_peers(self, limit=5):
+    def active_peers(self, limit=2):
         choices = [
             uri for name, uri in self.ns.list(metadata_all={"replica"}).items()
             if self.id not in name
@@ -56,25 +64,28 @@ class Replica:
                 break
 
     def get_updates_since(self, t0):
-        return [
-            (t, op.to_json()) for (t, op) in self.updates
-            if vector_clock.greater_than(t, t0)
-        ]
+        # here we need to use strict=False to prevent writes which were
+        # buffered from getting lost, since compare(strict=True) imposes
+        # a global order
+        return [(t, op.to_json()) for (t, op) in self.updates
+                if vector_clock.compare(t0, t, strict=False) < 1]
 
     def bg_sync(self):
         while True:
             time.sleep(self.sync_period)
             to_sync = []
+            # fetch current time
+            with self.lock:
+                end = self.time
             for peer in self.active_peers():
                 # this is ok since get_time() is monotone increasing
                 t = peer.get_time()
                 with self.lock:
-                    updates = self.get_updates_since(t)
-                    if updates:
-                        to_sync.append((peer, self.time, updates))
-            # avoid deadlock
-            for peer, end, updates in to_sync:
-                peer.sync(end, updates)
+                    to_sync.append((peer, self.get_updates_since(t)))
+            # move out of lock to prevent deadlock from happening
+            for peer, updates in to_sync:
+                if updates:
+                    peer.sync(end, updates)
                 peer._pyroRelease()
 
     @contextmanager
@@ -92,10 +103,10 @@ class Replica:
         with self.lock:
             updates = [(t, json_to_op(op)) for t, op in updates]
             self.updates = list(merge(self.updates, updates))
-            ratings = {}
-            for _, op in self.updates:
-                op.apply(ratings)
-            self.ratings = ratings
+            self.ratings = {}
+            for t, op in self.updates:
+                self.time = vector_clock.merge(self.time, t)
+                op.apply(self.ratings)
             self.time = vector_clock.merge(self.time, end)
 
     @Pyro4.expose
@@ -118,8 +129,8 @@ class Replica:
                 )
 
     @Pyro4.expose
-    def add_rating(self, user_id, movie_id, value, t):
-        with self.spin_until_can_reply(t):
+    def add_rating(self, user_id, movie_id, value):
+        with self.lock:
             op = Update(user_id, movie_id, value)
             self.time = vector_clock.increment(self.time, self.id, time.time())
             self.updates.append((self.time, op))
