@@ -23,7 +23,7 @@ def merge(a, b):
             continue
         c = vector_clock.compare(x[0], y[0])
         if c == -1: yield x; i += 1  # x < y
-        if c == 1: yield y; j += 1   # x > y
+        if c == +1: yield y; j += 1  # x > y
         # we never have duplicate events here because otherwise
         # previous if statement would handle it
         if c == 0:
@@ -127,6 +127,15 @@ class Replica:
                 self.ratings.get(user_id, {}),
                 self.time,
                 )
+
+    @Pyro4.expose
+    def add_rating_sync(self, user_id, movie_id, value, t):
+        with self.spin_until_can_reply(t):
+            op = Update(user_id, movie_id, value)
+            self.time = vector_clock.increment(self.time, self.id, time.time())
+            self.updates.append((self.time, op))
+            op.apply(self.ratings)
+            return self.time
 
     @Pyro4.expose
     def add_rating(self, user_id, movie_id, value):

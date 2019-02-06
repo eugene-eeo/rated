@@ -41,10 +41,9 @@ class Frontend:
             replica.add_rating(user_id, movie_id, value)
 
     @Pyro4.expose
-    def add_rating_strict(self, user_id, movie_id, value):
+    def add_rating_sync(self, user_id, movie_id, value):
         with self.replica as replica:
-            replica.get_ratings(user_id, self.time)
-            t = replica.add_rating(user_id, movie_id, value)
+            t = replica.add_rating_sync(user_id, movie_id, value, self.time)
             self.time = vector_clock.merge(t, self.time)
 
 
