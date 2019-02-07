@@ -18,8 +18,8 @@ def compare(p1, p2, strict=True):
     if not (lt ^ gt) and strict:
         # if lt and gt both = True or False, then compare
         # by timestamp instead
-        return (t1 > t2) - (t1 < t2)
-    return int(gt) - int(lt)
+        return 1 if t1 >= t2 else -1
+    return gt - lt
 
 
 sort_key = cmp_to_key(compare)

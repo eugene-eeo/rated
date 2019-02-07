@@ -16,21 +16,17 @@ def merge(a, b):
     while i < len(a) and j < len(b):
         x = a[i]
         y = b[j]
+        # duplicate event
         if x == y:
             yield x
             i += 1
             j += 1
             continue
         c = vector_clock.compare(x[0], y[0])
+        # don't need to handle c == 0 because
+        # c == 0 never happens under strict comparison
         if c == -1: yield x; i += 1  # x < y
         if c == +1: yield y; j += 1  # x > y
-        # we never have duplicate events here because otherwise
-        # previous if statement would handle it
-        if c == 0:
-            yield x
-            yield y
-            i += 1
-            j += 1
     # one of the sequences must be empty
     yield from islice(a, i, None)
     yield from islice(b, j, None)
@@ -64,9 +60,8 @@ class Replica:
                 break
 
     def get_updates_since(self, t0):
-        # here we need to use strict=False to prevent writes which were
-        # buffered from getting lost, since compare(strict=True) imposes
-        # a global order
+        # here we need to use strict=False to prevent concurrent writes
+        # from getting lost, since compare(strict=True) imposes a global order
         return [(t, op.to_json()) for (t, op) in self.updates
                 if vector_clock.compare(t0, t, strict=False) < 1]
 
@@ -88,8 +83,11 @@ class Replica:
                     peer.sync(end, updates)
                 peer._pyroRelease()
 
+    def increment(self):
+        self.time = vector_clock.increment(self.time, self.id, time.time())
+
     @contextmanager
-    def spin_until_can_reply(self, t, guarantee=10):
+    def spin_until(self, t, guarantee=10):
         for _ in range(guarantee):
             with self.lock:
                 if self.time == t or vector_clock.greater_than(self.time, t):
@@ -105,7 +103,6 @@ class Replica:
             self.updates = list(merge(self.updates, updates))
             self.ratings = {}
             for t, op in self.updates:
-                self.time = vector_clock.merge(self.time, t)
                 op.apply(self.ratings)
             self.time = vector_clock.merge(self.time, end)
 
@@ -122,7 +119,7 @@ class Replica:
 
     @Pyro4.expose
     def get_ratings(self, user_id, time):
-        with self.spin_until_can_reply(time):
+        with self.spin_until(time):
             return (
                 self.ratings.get(user_id, {}),
                 self.time,
@@ -130,9 +127,9 @@ class Replica:
 
     @Pyro4.expose
     def add_rating_sync(self, user_id, movie_id, value, t):
-        with self.spin_until_can_reply(t):
+        with self.spin_until(t):
+            self.increment()
             op = Update(user_id, movie_id, value)
-            self.time = vector_clock.increment(self.time, self.id, time.time())
             self.updates.append((self.time, op))
             op.apply(self.ratings)
             return self.time
@@ -140,21 +137,21 @@ class Replica:
     @Pyro4.expose
     def add_rating(self, user_id, movie_id, value):
         with self.lock:
+            self.increment()
             op = Update(user_id, movie_id, value)
-            self.time = vector_clock.increment(self.time, self.id, time.time())
             self.updates.append((self.time, op))
             op.apply(self.ratings)
-            return self.time
 
 
-ns = Pyro4.locateNS()
-with Pyro4.Daemon() as daemon:
-    replica = Replica(ns)
-    name = "replica:%s" % replica.id
-    uri = daemon.register(replica)
-    ns.register(name, uri, metadata={"replica"})
-    try:
-        threading.Thread(target=replica.bg_sync).start()
-        daemon.requestLoop()
-    except KeyboardInterrupt:
-        ns.remove(name)
+if __name__ == '__main__':
+    ns = Pyro4.locateNS()
+    with Pyro4.Daemon() as daemon:
+        replica = Replica(ns)
+        name = "replica:%s" % replica.id
+        uri = daemon.register(replica)
+        ns.register(name, uri, metadata={"replica"})
+        try:
+            threading.Thread(target=replica.bg_sync).start()
+            daemon.requestLoop()
+        except KeyboardInterrupt:
+            ns.remove(name)

@@ -30,29 +30,27 @@ class Frontend:
 
     @Pyro4.expose
     def get_ratings(self, user_id):
-        with self.replica as replica:
-            rating, time = replica.get_ratings(user_id, self.time)
-            self.time = vector_clock.merge(time, self.time)
-            return rating
+        rating, time = self.replica.get_ratings(user_id, self.time)
+        self.time = vector_clock.merge(time, self.time)
+        return rating
 
     @Pyro4.expose
     def add_rating(self, user_id, movie_id, value):
-        with self.replica as replica:
-            replica.add_rating(user_id, movie_id, value)
+        self.replica.add_rating(user_id, movie_id, value)
 
     @Pyro4.expose
     def add_rating_sync(self, user_id, movie_id, value):
-        with self.replica as replica:
-            t = replica.add_rating_sync(user_id, movie_id, value, self.time)
-            self.time = vector_clock.merge(t, self.time)
+        t = self.replica.add_rating_sync(user_id, movie_id, value, self.time)
+        self.time = vector_clock.merge(t, self.time)
 
 
-ns = Pyro4.locateNS()
-with Pyro4.Daemon() as daemon:
-    frontend = Frontend(ns)
-    uri = daemon.register(frontend)
-    ns.register("frontend", uri)
-    try:
-        daemon.requestLoop()
-    except KeyboardInterrupt:
-        ns.remove("frontend")
+if __name__ == '__main__':
+    ns = Pyro4.locateNS()
+    with Pyro4.Daemon() as daemon:
+        frontend = Frontend(ns)
+        uri = daemon.register(frontend)
+        ns.register("frontend", uri)
+        try:
+            daemon.requestLoop()
+        except KeyboardInterrupt:
+            ns.remove("frontend")
