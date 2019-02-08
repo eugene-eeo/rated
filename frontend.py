@@ -20,8 +20,6 @@ class Frontend:
             if replica.available():
                 self._replica = replica
                 return self._replica
-            # remember to close connection
-            replica._pyroRelease()
         raise RuntimeError("No replica available")
 
     @Pyro4.expose
@@ -36,7 +34,8 @@ class Frontend:
 
     @Pyro4.expose
     def add_rating(self, user_id, movie_id, value):
-        self.replica.add_rating(user_id, movie_id, value)
+        t = self.replica.add_rating(user_id, movie_id, value)
+        self.time = vector_clock.merge(t, self.time)
 
     @Pyro4.expose
     def add_rating_sync(self, user_id, movie_id, value):

@@ -2,39 +2,16 @@ import time
 import random
 import threading
 from contextlib import contextmanager
-from itertools import islice
-from uuid import uuid4
 
 import Pyro4
 import vector_clock
 from models import Update, json_to_op
-
-
-def merge(a, b):
-    i = 0
-    j = 0
-    while i < len(a) and j < len(b):
-        x = a[i]
-        y = b[j]
-        # duplicate event
-        if x == y:
-            yield x
-            i += 1
-            j += 1
-            continue
-        c = vector_clock.compare(x[0], y[0])
-        # don't need to handle c == 0 because
-        # c == 0 never happens under strict comparison
-        if c == -1: yield x; i += 1  # x < y
-        if c == +1: yield y; j += 1  # x > y
-    # one of the sequences must be empty
-    yield from islice(a, i, None)
-    yield from islice(b, j, None)
+from utils import merge, generate_id, find_random_peers
 
 
 class Replica:
     def __init__(self, ns):
-        self.id = uuid4().hex
+        self.id = generate_id()
         self.ns = ns
         self.lock = threading.RLock()
         self.time = vector_clock.create()
@@ -43,13 +20,8 @@ class Replica:
         self.sync_period = 1  # seconds until next sync
 
     def active_peers(self, limit=2):
-        choices = [
-            uri for name, uri in self.ns.list(metadata_all={"replica"}).items()
-            if self.id not in name
-        ]
-        random.shuffle(choices)
         n = 0
-        for uri in choices:
+        for uri in find_random_peers(self.ns, self.id, "replica"):
             peer = Pyro4.Proxy(uri)
             if not peer.available():
                 peer._pyroRelease()
@@ -75,8 +47,9 @@ class Replica:
             for peer in self.active_peers():
                 # this is ok since get_time() is monotone increasing
                 t = peer.get_time()
-                with self.lock:
-                    to_sync.append((peer, self.get_updates_since(t)))
+                if t != end:
+                    with self.lock:
+                        to_sync.append((peer, self.get_updates_since(t)))
             # move out of lock to prevent deadlock from happening
             for peer, updates in to_sync:
                 if updates:
@@ -94,7 +67,8 @@ class Replica:
                     yield
                     return
             time.sleep(self.sync_period)
-        yield
+        with self.lock:
+            yield
 
     @Pyro4.expose
     def sync(self, end, updates):
@@ -141,6 +115,7 @@ class Replica:
             op = Update(user_id, movie_id, value)
             self.updates.append((self.time, op))
             op.apply(self.ratings)
+            return self.time
 
 
 if __name__ == '__main__':
