@@ -1,7 +1,7 @@
 import time
-import random
 import threading
 from contextlib import contextmanager
+from random import random
 
 import Pyro4
 import vector_clock
@@ -20,16 +20,17 @@ class Replica:
         self.sync_period = 1  # seconds until next sync
 
     def active_peers(self, limit=2):
-        n = 0
-        for uri in find_random_peers(self.ns, self.id, "replica"):
-            peer = Pyro4.Proxy(uri)
-            if not peer.available():
-                peer._pyroRelease()
-                continue
-            yield peer
-            n += 1
-            if n == limit:
-                break
+        with self.ns:
+            n = 0
+            for uri in find_random_peers(self.ns, self.id, "replica"):
+                peer = Pyro4.Proxy(uri)
+                if not peer.available():
+                    peer._pyroRelease()
+                    continue
+                yield peer
+                n += 1
+                if n == limit:
+                    break
 
     def get_updates_since(self, t0):
         # here we need to use strict=False to prevent concurrent writes
@@ -82,7 +83,7 @@ class Replica:
 
     @Pyro4.expose
     def available(self):
-        if random.random() <= 0.75:
+        if random() <= 0.75:
             return True
         return False
 
