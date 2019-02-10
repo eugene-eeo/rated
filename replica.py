@@ -6,14 +6,15 @@ from random import random
 import Pyro4
 import vector_clock
 from models import Update, json_to_op
-from utils import merge, generate_id, find_random_peers
+from utils import merge, generate_id, find_random_peers, ignore_disconnects
 
 
 class Replica:
     def __init__(self, ns):
         self.id = generate_id()
         self.ns = ns
-        self.lock = threading.RLock()
+        self.busy = False
+        self._lock = threading.RLock()
         self.time = vector_clock.create()
         self.ratings = {}
         self.updates = []
@@ -23,14 +24,15 @@ class Replica:
         with self.ns:
             n = 0
             for uri in find_random_peers(self.ns, self.id, "replica"):
-                peer = Pyro4.Proxy(uri)
-                if not peer.available():
-                    peer._pyroRelease()
-                    continue
-                yield peer
-                n += 1
-                if n == limit:
-                    break
+                with ignore_disconnects():
+                    peer = Pyro4.Proxy(uri)
+                    if not peer.available():
+                        peer._pyroRelease()
+                        continue
+                    yield peer
+                    n += 1
+                    if n == limit:
+                        break
 
     def get_updates_since(self, t0):
         # here we need to use strict=False to prevent concurrent writes
@@ -46,30 +48,41 @@ class Replica:
             with self.lock:
                 end = self.time
             for peer in self.active_peers():
-                # this is ok since get_time() is monotone increasing
-                t = peer.get_time()
-                if t != end:
-                    with self.lock:
-                        to_sync.append((peer, self.get_updates_since(t)))
+                with ignore_disconnects():
+                    # this is ok since get_time() is monotone increasing
+                    t = peer.get_time()
+                    if t != end:
+                        with self.lock:
+                            updates = self.get_updates_since(t)
+                        to_sync.append((peer, updates))
             # move out of lock to prevent deadlock from happening
             for peer, updates in to_sync:
                 if updates:
-                    peer.sync(end, updates)
+                    with ignore_disconnects():
+                        print("Sync: %s %s" % (self.id[:8], time.time()))
+                        peer.sync(end, updates)
                 peer._pyroRelease()
 
     def increment(self):
         self.time = vector_clock.increment(self.time, self.id, time.time())
 
+    @property
     @contextmanager
-    def spin_until(self, t, guarantee=10):
+    def lock(self):
+        self.busy = True
+        with self._lock:
+            yield
+            self.busy = False
+
+    @contextmanager
+    def spin_until(self, t, guarantee=5):
         for _ in range(guarantee):
             with self.lock:
-                if self.time == t or vector_clock.greater_than(self.time, t):
+                if self.time[0] == t[0] or vector_clock.greater_than(self.time, t):
                     yield
                     return
             time.sleep(self.sync_period)
-        with self.lock:
-            yield
+        raise RuntimeError("Cannot answer query")
 
     @Pyro4.expose
     def sync(self, end, updates):
@@ -83,9 +96,7 @@ class Replica:
 
     @Pyro4.expose
     def available(self):
-        if random() <= 0.75:
-            return True
-        return False
+        return not self.busy and random() <= 0.75
 
     @Pyro4.expose
     def get_time(self):
@@ -101,15 +112,6 @@ class Replica:
                 )
 
     @Pyro4.expose
-    def add_rating_sync(self, user_id, movie_id, value, t):
-        with self.spin_until(t):
-            self.increment()
-            op = Update(user_id, movie_id, value)
-            self.updates.append((self.time, op))
-            op.apply(self.ratings)
-            return self.time
-
-    @Pyro4.expose
     def add_rating(self, user_id, movie_id, value):
         with self.lock:
             self.increment()
@@ -117,6 +119,12 @@ class Replica:
             self.updates.append((self.time, op))
             op.apply(self.ratings)
             return self.time
+
+    @Pyro4.expose
+    def get_all_ratings(self, time):
+        with self.spin_until(time):
+            for user, ratings in self.ratings.items():
+                yield (user, ratings), self.time
 
 
 if __name__ == '__main__':
@@ -126,8 +134,5 @@ if __name__ == '__main__':
         name = "replica:%s" % replica.id
         uri = daemon.register(replica)
         ns.register(name, uri, metadata={"replica"})
-        try:
-            threading.Thread(target=replica.bg_sync).start()
-            daemon.requestLoop()
-        except KeyboardInterrupt:
-            ns.remove(name)
+        threading.Thread(target=replica.bg_sync).start()
+        daemon.requestLoop()

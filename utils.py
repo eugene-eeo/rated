@@ -1,7 +1,10 @@
 from random import shuffle
 from uuid import uuid4
+from contextlib import contextmanager
 from itertools import islice
+
 from vector_clock import compare
+from Pyro4.errors import ConnectionClosedError, CommunicationError, TimeoutError
 
 
 def generate_id():
@@ -36,3 +39,11 @@ def find_random_peers(ns, id, metadata):
     choices = [uri for name, uri in peers.items() if id not in name]
     shuffle(choices)
     return choices
+
+
+@contextmanager
+def ignore_disconnects():
+    try:
+        yield
+    except (ConnectionClosedError, CommunicationError, TimeoutError):
+        pass
