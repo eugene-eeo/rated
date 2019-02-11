@@ -1,3 +1,4 @@
+from base64 import b64encode
 from random import shuffle
 from uuid import uuid4
 from contextlib import contextmanager
@@ -8,7 +9,7 @@ from Pyro4.errors import ConnectionClosedError, CommunicationError, TimeoutError
 
 
 def generate_id():
-    return uuid4().hex
+    return b64encode(uuid4().bytes).decode()[:-2]
 
 
 def merge(a, b):
