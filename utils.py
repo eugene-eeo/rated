@@ -25,11 +25,14 @@ def merge(a, b):
             i += 1
             j += 1
             continue
-        c = compare(x[0], y[0])
-        # don't need to handle c == 0 because
-        # c == 0 never happens under strict comparison
+        c = compare(x[1], y[1])
         if c == -1: yield x; i += 1  # x < y
         if c == +1: yield y; j += 1  # x > y
+        if c == 0:
+            yield x;
+            yield y;
+            i += 1;
+            j += 1;
     # one of the sequences must be empty
     yield from islice(a, i, None)
     yield from islice(b, j, None)

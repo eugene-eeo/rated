@@ -1,138 +1,115 @@
 import time
-import threading
-from contextlib import contextmanager
-from random import random
-
 import Pyro4
-import vector_clock
-from models import Update, json_to_op
-from utils import merge, generate_id, find_random_peers, ignore_disconnects
+from models import Update
+from threading import Lock, Thread
+from utils import generate_id, find_random_peers, ignore_disconnects, merge
+import vector_clock as vc
 
 
 class Replica:
-    def __init__(self, ns):
+    def __init__(self):
         self.id = generate_id()
-        self.ns = ns
-        self.busy = False
-        self._lock = threading.RLock()
-        self.time = vector_clock.create()
-        self.ratings = {}
-        self.updates = []
-        self.sync_period = 1  # seconds until next sync
+        self.ns = Pyro4.locateNS()
+        # state and updates
+        self.db = {}
+        self.log = []
+        self.ts = vc.create() # timestamp of state
+        self.lock = Lock()
+        # gossip
+        self.sync_period = 2
+        self.sync_ts = vc.create() # timestamp of replica
 
-    def active_peers(self, limit=2):
+    def is_stable(self):
+        if len(self.log) <= 1:
+            return True
+        it = iter(self.log)
+        next(it)
+        return all(vc.greater_than(b[1], a[1]) for a, b in zip(self.log, it))
+
+    def peers(self):
         with self.ns:
-            n = 0
-            for uri in find_random_peers(self.ns, self.id, "replica"):
-                with ignore_disconnects():
-                    peer = Pyro4.Proxy(uri)
-                    if not peer.available():
-                        peer._pyroRelease()
-                        continue
-                    yield peer
-                    n += 1
-                    if n == limit:
-                        break
+            peers = find_random_peers(self.ns, self.id, "replica")
+        n = 0
+        for peer in peers:
+            yield Pyro4.Proxy(peer)
+            n += 1
+            if n == 2:
+                break
 
-    def get_updates_since(self, t0):
-        # here we need to use strict=False to prevent concurrent writes
-        # from getting lost, since compare(strict=True) imposes a global order
-        return [(t, op.to_json()) for (t, op) in self.updates
-                if vector_clock.compare(t0, t, strict=False) < 1]
-
-    def bg_sync(self):
+    def gossip(self):
         while True:
             time.sleep(self.sync_period)
-            to_sync = []
-            # fetch current time
+            # filter relevant events
+            logs = []
+            for peer in self.peers():
+                # if peer.available():
+                t = peer.get_timestamp()
+                with self.lock:
+                    logs.append((peer, self.sync_ts, [
+                        (u, tt) for u, tt in self.log if
+                            vc.is_concurrent(tt, t) or
+                            vc.greater_than(tt, t)
+                        ]))
+            # now send events
+            for peer, ts, log in logs:
+                with peer:
+                    if len(log) == 0:
+                        continue
+                    peer.sync(log, ts)
+
+    # exposed methods
+
+    @Pyro4.expose
+    def sync(self, log, ts):
+        with self.lock:
+            self.log = list(merge(self.log, [(Update(*u), ts) for u, ts in log]))
+            self.sync_ts = vc.merge(self.sync_ts, ts)
+            # apply updates if possible
+            if self.is_stable():
+                self.db = {}
+                for u, ts in self.log:
+                    u.apply(self.db)
+                    self.ts = vc.merge(self.ts, ts)
+
+    @Pyro4.expose
+    def get_timestamp(self):
+        return self.sync_ts
+
+    @Pyro4.expose
+    def get(self, user_id, ts):
+        while True:
             with self.lock:
-                end = self.time
-            for peer in self.active_peers():
-                with ignore_disconnects():
-                    # this is ok since get_time() is monotone increasing
-                    t = peer.get_time()
-                    if t != end:
-                        with self.lock:
-                            updates = self.get_updates_since(t)
-                        to_sync.append((peer, updates))
-            # move out of lock to prevent deadlock from happening
-            for peer, updates in to_sync:
-                if updates:
-                    with ignore_disconnects():
-                        print("Sync: %s %s" % (self.id[:8], time.time()))
-                        peer.sync(end, updates)
-                peer._pyroRelease()
-
-    def increment(self):
-        self.time = vector_clock.increment(self.time, self.id, time.time())
-
-    @property
-    @contextmanager
-    def lock(self):
-        self.busy = True
-        with self._lock:
-            yield
-            self.busy = False
-
-    @contextmanager
-    def spin_until(self, t, guarantee=5):
-        for _ in range(guarantee):
-            with self.lock:
-                if self.time[0] == t[0] or vector_clock.greater_than(self.time, t):
-                    yield
-                    return
+                print(self.ts)
+                # can respond
+                if vc.geq(self.ts, ts):
+                    return self.db.get(user_id, {}), self.ts
             time.sleep(self.sync_period)
-        raise RuntimeError("Cannot answer query")
 
     @Pyro4.expose
-    def sync(self, end, updates):
+    def update(self, update, ts):
+        u = Update(*update)
+
         with self.lock:
-            updates = [(t, json_to_op(op)) for t, op in updates]
-            self.updates = list(merge(self.updates, updates))
-            self.ratings = {}
-            for t, op in self.updates:
-                op.apply(self.ratings)
-            self.time = vector_clock.merge(self.time, end)
+            prev = ts.copy()
+            self.sync_ts = vc.increment(self.sync_ts, self.id)
+            ts[self.id] = self.sync_ts[self.id]
 
-    @Pyro4.expose
-    def available(self):
-        return not self.busy and random() <= 0.75
+            # add to log
+            self.log.append((u, ts))
+            self.log.sort(key=lambda x: vc.sort_key(x[1]))
 
-    @Pyro4.expose
-    def get_time(self):
-        with self.lock:
-            return self.time
-
-    @Pyro4.expose
-    def get_ratings(self, user_id, time):
-        with self.spin_until(time):
-            return (
-                self.ratings.get(user_id, {}),
-                self.time,
-                )
-
-    @Pyro4.expose
-    def add_rating(self, user_id, movie_id, value):
-        with self.lock:
-            self.increment()
-            op = Update(user_id, movie_id, value)
-            self.updates.append((self.time, op))
-            op.apply(self.ratings)
-            return self.time
-
-    @Pyro4.expose
-    def get_all_ratings(self, time):
-        with self.spin_until(time):
-            for user, ratings in self.ratings.items():
-                yield (user, ratings), self.time
+            # apply update immediately if possible
+            if vc.geq(self.ts, prev):
+                u.apply(self.db)
+                self.ts = vc.merge(ts, self.ts)
+            return ts
 
 
 if __name__ == '__main__':
-    ns = Pyro4.locateNS()
+    r = Replica()
     with Pyro4.Daemon() as daemon:
-        replica = Replica(ns)
-        name = "replica:%s" % replica.id
-        uri = daemon.register(replica)
-        ns.register(name, uri, metadata={"replica"})
-        threading.Thread(target=replica.bg_sync).start()
+        uri = daemon.register(r)
+        with Pyro4.locateNS() as ns:
+            ns.register("replica:%s" % r.id, uri, metadata={"replica"})
+        Thread(target=r.gossip).start()
         daemon.requestLoop()

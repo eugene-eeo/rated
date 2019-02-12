@@ -1,5 +1,4 @@
-rated
-=====
+# rated
 
 Distributed ratings system with replication via gossip.
 Uses Pyro4.
@@ -12,3 +11,8 @@ $ for i in $(seq 10); do
 >   python replica.py &
 > done
 ```
+
+## todo
+
+ - [ ] sync state for new peers
+ - [ ] compress logs
