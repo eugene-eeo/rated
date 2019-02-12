@@ -14,6 +14,8 @@ def generate_id():
 
 def merge(a, b):
     # Merges two sorted event logs together
+    stable = True
+    u = []
     i = 0
     j = 0
     while i < len(a) and j < len(b):
@@ -21,21 +23,23 @@ def merge(a, b):
         y = b[j]
         # duplicate event
         if x == y:
-            yield x
+            u.append(x)
             i += 1
             j += 1
             continue
         c = compare(x[1], y[1])
-        if c == -1: yield x; i += 1  # x < y
-        if c == +1: yield y; j += 1  # x > y
+        if c == -1: u.append(x); i += 1  # x < y
+        if c == +1: u.append(y); j += 1  # x > y
         if c == 0:
-            yield x;
-            yield y;
-            i += 1;
-            j += 1;
+            stable = False
+            u.append(x)
+            u.append(y)
+            i += 1
+            j += 1
     # one of the sequences must be empty
-    yield from islice(a, i, None)
-    yield from islice(b, j, None)
+    u.extend(islice(a, i, None))
+    u.extend(islice(b, j, None))
+    return u, stable
 
 
 def find_random_peers(ns, id, metadata):
