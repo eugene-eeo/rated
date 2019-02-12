@@ -1,5 +1,7 @@
 import time
-from itertools import chain
+from itertools import chain, islice
+from contextlib import contextmanager
+from random import random
 
 import Pyro4
 from models import Update
@@ -16,36 +18,45 @@ class Replica:
         self.db = {}
         self.log = []
         self.ts = vc.create() # timestamp of state
-        self.lock = Lock()
+        self._lock = Lock()
         # gossip
+        self.busy = False
         self.buffer = []
         self.sync_period = 2
         self.sync_ts = vc.create() # timestamp of replica
 
-    def peers(self, limit=2):
+    @property
+    @contextmanager
+    def lock(self):
+        with self._lock:
+            self.busy = True
+            yield self._lock
+            self.busy = False
+
+    def peers(self):
         with self.ns:
             peers = find_random_peers(self.ns, self.id, "replica")
-        n = 0
         for peer in peers:
-            yield Pyro4.Proxy(peer)
-            n += 1
-            if n == limit:
-                break
+            peer = Pyro4.Proxy(peer)
+            if not peer.available():
+                peer._pyroRelease()
+                continue
+            yield peer
 
     def gossip(self):
         while True:
             time.sleep(self.sync_period)
             # filter relevant events
             logs = []
-            for peer in self.peers():
+            for peer in islice(self.peers(), 2):
                 # if peer.available():
                 t = peer.get_timestamp()
                 with self.lock:
                     # only perform checks if the other replica hasn't caught up
-                    # with us
                     events = []
                     if t != self.sync_ts:
-                        events = [(u, tt) for u, tt in chain(self.log, self.buffer) if
+                        log = chain(self.log, self.buffer) if vc.geq(self.ts, t) else self.buffer
+                        events = [(u, tt) for u, tt in log if
                                 vc.is_concurrent(tt, t) or
                                 vc.greater_than(tt, t)]
                     logs.append((peer, self.sync_ts, events))
@@ -56,6 +67,10 @@ class Replica:
                         peer.sync(log, ts)
 
     # exposed methods
+
+    @Pyro4.expose
+    def available(self):
+        return not self.busy and random() <= 0.75
 
     @Pyro4.expose
     def sync(self, log, ts):

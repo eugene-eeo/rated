@@ -17,6 +17,11 @@ class Frontend:
 
     @property
     def replica(self):
+        # try to get primary
+        with ignore_disconnects():
+            if self._replica and self._replica.available():
+                return self._replica
+        # try random replicas
         uris = list(self.list_replicas())
         random.shuffle(uris)
         for uri in uris:
@@ -24,16 +29,7 @@ class Frontend:
                 replica = Pyro4.Proxy(uri)
                 self._replica = replica
                 return self._replica
-        # with ignore_disconnects():
-        #     if self._replica and self._replica.available():
-        #         return self._replica
-        # for uri in self.list_replicas():
-        #     with ignore_disconnects():
-        #         replica = Pyro4.Proxy(uri)
-        #         if replica.available():
-        #             self._replica = replica
-        #             return self._replica
-        # raise RuntimeError("No replica available")
+        raise RuntimeError("No replica available")
 
     @Pyro4.expose
     def get_timestamp(self):
