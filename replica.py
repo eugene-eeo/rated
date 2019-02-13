@@ -1,4 +1,4 @@
-import time
+from time import sleep
 from itertools import chain, islice
 from contextlib import contextmanager
 from random import random
@@ -46,8 +46,7 @@ class Replica:
 
     def gossip(self):
         while True:
-            time.sleep(self.sync_period)
-            # filter relevant events
+            sleep(self.sync_period)
             logs = []
             for peer in islice(self.peers(), 2):
                 with ignore_disconnects():
