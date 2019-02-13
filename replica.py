@@ -38,9 +38,10 @@ class Replica:
             peers = find_random_peers(self.ns, self.id, "replica")
         for peer in peers:
             peer = Pyro4.Proxy(peer)
-            if not peer.available():
-                peer._pyroRelease()
-                continue
+            with ignore_disconnects():
+                if not peer.available():
+                    peer._pyroRelease()
+                    continue
             yield peer
 
     def gossip(self):
@@ -49,20 +50,20 @@ class Replica:
             # filter relevant events
             logs = []
             for peer in islice(self.peers(), 2):
-                # if peer.available():
-                t = peer.get_timestamp()
-                with self.lock:
-                    # only perform checks if the other replica hasn't caught up
-                    events = []
-                    if t != self.sync_ts:
-                        log = chain(self.log, self.buffer) if vc.geq(self.ts, t) else self.buffer
-                        events = [(u, tt) for u, tt in log if
-                                vc.is_concurrent(tt, t) or
-                                vc.greater_than(tt, t)]
-                    logs.append((peer, self.sync_ts, events))
+                with ignore_disconnects():
+                    t = peer.get_timestamp()
+                    with self.lock:
+                        events = []
+                        # only scan log if the other replica hasn't caught up
+                        if t != self.sync_ts:
+                            log = chain(self.log, self.buffer) if vc.geq(self.ts, t) else self.buffer
+                            events = [(u, tt) for u, tt in log if
+                                    vc.is_concurrent(tt, t) or
+                                    vc.greater_than(tt, t)]
+                        logs.append((peer, self.sync_ts, events))
             # now send events
             for peer, ts, log in logs:
-                with peer:
+                with peer, ignore_disconnects():
                     if log:
                         peer.sync(log, ts)
 
