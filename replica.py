@@ -79,23 +79,23 @@ class Replica:
     def sync(self, log, ts):
         with self.lock:
             self.sync_ts = vc.merge(self.sync_ts, ts)
-            self.buffer = merge(self.buffer, [Update(*u) for u in log])
+            updates = merge(self.buffer, [Update(*u) for u in log])
+            b = []
             # apply updates if possible
-            n = 0
-            for u in self.buffer:
+            for u in updates:
                 if u.id in self.seen:
-                    n += 1
                     continue
                 if vc.geq(self.ts, vc.decrement(u.ts, u.node_id)):
                     u.apply(self.db)
                     self.ts = vc.merge(self.ts, u.ts)
                     self.seen.add(u.id)
                     self.log.append(u)
-                    n += 1
                     continue
+                b = [u]
                 break
             # trim
-            self.buffer = self.buffer[n:]
+            self.buffer = b
+            self.buffer.extend(updates)
 
     @Pyro4.expose
     def get_log(self):
