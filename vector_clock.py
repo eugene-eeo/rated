@@ -21,7 +21,13 @@ def compare(v1, v2):
     return gt - lt
 
 
-sort_key = cmp_to_key(compare)
+def sort_key(ts, f=cmp_to_key(compare)):
+    # heuristics for sorting vector clocks
+    return (
+        f(ts),
+        len(ts),
+        sum(ts.values()),
+    )
 
 
 def is_concurrent(v1, v2):
