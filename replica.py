@@ -29,8 +29,8 @@ class Replica:
     @property
     @contextmanager
     def lock(self):
+        self.busy = True
         with self._lock:
-            self.busy = True
             yield self._lock
             self.busy = False
 
@@ -96,7 +96,6 @@ class Replica:
                 break
             # trim
             self.buffer = self.buffer[n:]
-            print(self.id, len(self.log), len(self.buffer))
 
     @Pyro4.expose
     def get_log(self):
