@@ -1,7 +1,7 @@
 from collections import namedtuple
 
 
-class Update(namedtuple('Update', 'id,user_id,movie_id,value,node_id,ts')):
+class Update(namedtuple('Update', 'id,user_id,movie_id,value,node_id,ts,time')):
     def apply(self, ratings):
         if self.user_id not in ratings:
             ratings[self.user_id] = {}

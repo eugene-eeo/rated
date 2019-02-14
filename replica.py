@@ -1,4 +1,4 @@
-from time import sleep
+from time import sleep, time
 from itertools import chain, islice
 from contextlib import contextmanager
 from random import random
@@ -6,25 +6,24 @@ from random import random
 import Pyro4
 from models import Update
 from threading import Lock, Thread
-from utils import generate_id, find_random_peers, ignore_disconnects, merge
+from utils import generate_id, find_random_peers, ignore_disconnects
 import vector_clock as vc
 
 
 class Replica:
     def __init__(self):
-        self.id = generate_id()
+        self.id = generate_id(5)
         self.ns = Pyro4.locateNS()
         # state and updates
         self.db = {}
         self.log = []
-        self.buffer = []
         self.ts = vc.create() # timestamp of state
         self._lock = Lock()
         # gossip
         self.busy = False
         self.sync_period = 2
         self.sync_ts = vc.create() # timestamp of replica
-        self.seen = set()
+        self.has_new_gossip = False
 
     @property
     @contextmanager
@@ -47,27 +46,53 @@ class Replica:
 
     def gossip(self):
         while True:
+            with self.lock:
+                if self.has_new_gossip:
+                    self.has_new_gossip = False
+                    self.apply_updates()
             sleep(self.sync_period)
             logs = []
             for peer in islice(self.peers(), 5):
                 with ignore_disconnects():
                     t = peer.get_timestamp()
                     with self.lock:
-                        events = []
-                        # only scan log if the other replica hasn't caught up
-                        if t != self.sync_ts:
-                            log = chain(self.log, self.buffer) if vc.geq(self.ts, t) else self.buffer
-                            events = [u for u in log if
-                                vc.is_concurrent(u.ts, t) or
-                                vc.greater_than(u.ts, t)
-                                ][:100]
-                        logs.append((peer, events))
+                        log = chain(self.log)
+                        events = [u for u in log if vc.is_concurrent(u.ts, t) or vc.greater_than(u.ts, t)]
+                        logs.append((peer, self.sync_ts, events))
             # now send events
-            for peer, log in logs:
+            for peer, ts, log in logs:
                 with peer, ignore_disconnects():
                     if log:
-                        ts = log[-1].ts
                         peer.sync(log, ts)
+
+    def apply_updates(self):
+        # replay history
+        self.ts = vc.create()
+        self.db = {}
+        seen = set()
+        # apply updates if possible
+        h = True
+        unprocessed = self.log
+        log = []
+        while h:
+            h = False
+            b = []
+            unprocessed.sort(key=lambda x: (vc.sort_key(x.ts), x.time))
+            for u in unprocessed:
+                if u.id in seen:
+                    continue
+                if vc.geq(self.ts, vc.decrement(u.ts, u.node_id)):
+                    h = True
+                    u.apply(self.db)
+                    self.ts = vc.merge(self.ts, u.ts)
+                    seen.add(u.id)
+                    log.append(u)
+                    continue
+                b.append(u)
+            unprocessed = b
+        log.extend(unprocessed)
+        self.log = log
+        print(self.id, self.ts, len(self.log))
 
     # exposed methods
 
@@ -79,23 +104,8 @@ class Replica:
     def sync(self, log, ts):
         with self.lock:
             self.sync_ts = vc.merge(self.sync_ts, ts)
-            updates = merge(self.buffer, [Update(*u) for u in log])
-            b = []
-            # apply updates if possible
-            for u in updates:
-                if u.id in self.seen:
-                    continue
-                if vc.geq(self.ts, vc.decrement(u.ts, u.node_id)):
-                    u.apply(self.db)
-                    self.ts = vc.merge(self.ts, u.ts)
-                    self.seen.add(u.id)
-                    self.log.append(u)
-                    continue
-                b = [u]
-                break
-            # trim
-            self.buffer = b
-            self.buffer.extend(updates)
+            self.log.extend(Update(*u) for u in log)
+            self.has_new_gossip = True
 
     @Pyro4.expose
     def get_log(self):
@@ -103,7 +113,7 @@ class Replica:
 
     @Pyro4.expose
     def get_timestamp(self):
-        return self.ts
+        return self.sync_ts
 
     @Pyro4.expose
     def get(self, user_id, ts, guarantee=20):
@@ -121,16 +131,13 @@ class Replica:
             prev = ts.copy()
             self.sync_ts = vc.increment(self.sync_ts, self.id)
             ts[self.id] = self.sync_ts[self.id]
-            u = Update(generate_id(15), *update, self.id, ts)
+            u = Update(generate_id(15), *update, self.id, ts, time())
 
             # apply update immediately if possible
+            self.log.append(u)
             if vc.geq(self.ts, prev):
                 u.apply(self.db)
                 self.ts = vc.merge(u.ts, self.ts)
-                self.log.append(u)
-                self.seen.add(u.id)
-            else:
-                self.buffer.append(u)
             return ts
 
 

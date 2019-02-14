@@ -2,44 +2,12 @@ from base64 import b64encode
 from random import shuffle
 from uuid import uuid4
 from contextlib import contextmanager
-from itertools import islice
 
-from vector_clock import compare
 from Pyro4.errors import ConnectionClosedError, CommunicationError, TimeoutError
 
 
 def generate_id(l=10):
     return b64encode(uuid4().bytes).decode()[:-2][:l]
-
-
-def merge(a, b):
-    # Merges two sorted event logs together
-    i = 0
-    j = 0
-    while i < len(a) and j < len(b):
-        x = a[i]
-        y = b[j]
-        # duplicate event
-        if x.id == y.id:
-            yield x
-            i += 1
-            j += 1
-            continue
-        c = compare(x.ts, y.ts)
-        if c == -1: i += 1; yield x  # x < y
-        if c == +1: j += 1; yield y  # x > y
-        if c == 0:
-            i += 1
-            j += 1
-            if x.id < y.id:
-                yield x
-                yield y
-            else:
-                yield y
-                yield x
-    # one of the sequences must be empty
-    yield from islice(a, i, None)
-    yield from islice(b, j, None)
 
 
 def find_random_peers(ns, id, metadata):
