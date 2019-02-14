@@ -17,13 +17,14 @@ class Replica:
         # state and updates
         self.db = {}
         self.log = []
+        self.buffer = []
         self.ts = vc.create() # timestamp of state
         self._lock = Lock()
         # gossip
         self.busy = False
-        self.buffer = []
         self.sync_period = 2
         self.sync_ts = vc.create() # timestamp of replica
+        self.seen = set()
 
     @property
     @contextmanager
@@ -48,7 +49,7 @@ class Replica:
         while True:
             sleep(self.sync_period)
             logs = []
-            for peer in islice(self.peers(), 2):
+            for peer in islice(self.peers(), 5):
                 with ignore_disconnects():
                     t = peer.get_timestamp()
                     with self.lock:
@@ -56,14 +57,16 @@ class Replica:
                         # only scan log if the other replica hasn't caught up
                         if t != self.sync_ts:
                             log = chain(self.log, self.buffer) if vc.geq(self.ts, t) else self.buffer
-                            events = [(u, tt) for u, tt in log if
-                                    vc.is_concurrent(tt, t) or
-                                    vc.greater_than(tt, t)]
-                        logs.append((peer, self.sync_ts, events))
+                            events = [u for u in log if
+                                vc.is_concurrent(u.ts, t) or
+                                vc.greater_than(u.ts, t)
+                                ][:100]
+                        logs.append((peer, events))
             # now send events
-            for peer, ts, log in logs:
+            for peer, log in logs:
                 with peer, ignore_disconnects():
                     if log:
+                        ts = log[-1].ts
                         peer.sync(log, ts)
 
     # exposed methods
@@ -75,45 +78,60 @@ class Replica:
     @Pyro4.expose
     def sync(self, log, ts):
         with self.lock:
-            self.buffer, is_stable = merge(self.buffer, [(Update(*u), ts) for u, ts in log])
             self.sync_ts = vc.merge(self.sync_ts, ts)
+            self.buffer = merge(self.buffer, [Update(*u) for u in log])
             # apply updates if possible
-            if is_stable:
-                for u, ts in self.buffer:
+            n = 0
+            for u in self.buffer:
+                if u.id in self.seen:
+                    n += 1
+                    continue
+                if vc.geq(self.ts, vc.decrement(u.ts, u.node_id)):
                     u.apply(self.db)
-                    self.ts = vc.merge(self.ts, ts)
-                self.log.extend(self.buffer)
-                self.buffer = []
+                    self.ts = vc.merge(self.ts, u.ts)
+                    self.seen.add(u.id)
+                    self.log.append(u)
+                    n += 1
+                    continue
+                break
+            # trim
+            self.buffer = self.buffer[n:]
+            print(self.id, len(self.log), len(self.buffer))
+
+    @Pyro4.expose
+    def get_log(self):
+        return self.ts, self.log
 
     @Pyro4.expose
     def get_timestamp(self):
-        return self.sync_ts
+        return self.ts
 
     @Pyro4.expose
-    def get(self, user_id, ts):
+    def get(self, user_id, ts, guarantee=20):
         while True:
             with self.lock:
                 # can respond
-                if vc.geq(self.ts, ts):
+                if vc.geq(self.ts, ts) or guarantee <= 0:
                     return self.db.get(user_id, {}), self.ts
-            time.sleep(self.sync_period)
+            sleep(self.sync_period)
+            guarantee -= 1
 
     @Pyro4.expose
     def update(self, update, ts):
-        u = Update(*update)
-
         with self.lock:
             prev = ts.copy()
             self.sync_ts = vc.increment(self.sync_ts, self.id)
             ts[self.id] = self.sync_ts[self.id]
+            u = Update(generate_id(15), *update, self.id, ts)
 
             # apply update immediately if possible
             if vc.geq(self.ts, prev):
                 u.apply(self.db)
-                self.ts = vc.merge(ts, self.ts)
-                self.log.append((u, ts))
+                self.ts = vc.merge(u.ts, self.ts)
+                self.log.append(u)
+                self.seen.add(u.id)
             else:
-                self.buffer.append((u, ts))
+                self.buffer.append(u)
             return ts
 
 

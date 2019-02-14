@@ -8,13 +8,12 @@ from vector_clock import compare
 from Pyro4.errors import ConnectionClosedError, CommunicationError, TimeoutError
 
 
-def generate_id():
-    return b64encode(uuid4().bytes).decode()[:-2]
+def generate_id(l=10):
+    return b64encode(uuid4().bytes).decode()[:-2][:l]
 
 
 def merge(a, b):
     # Merges two sorted event logs together
-    stable = True
     u = []
     i = 0
     j = 0
@@ -22,16 +21,15 @@ def merge(a, b):
         x = a[i]
         y = b[j]
         # duplicate event
-        if x == y:
+        if x.id == y.id:
             u.append(x)
             i += 1
             j += 1
             continue
-        c = compare(x[1], y[1])
+        c = compare(x.ts, y.ts)
         if c == -1: u.append(x); i += 1  # x < y
         if c == +1: u.append(y); j += 1  # x > y
         if c == 0:
-            stable = False
             u.append(x)
             u.append(y)
             i += 1
@@ -39,7 +37,7 @@ def merge(a, b):
     # one of the sequences must be empty
     u.extend(islice(a, i, None))
     u.extend(islice(b, j, None))
-    return u, stable
+    return u
 
 
 def find_random_peers(ns, id, metadata):

@@ -1,6 +1,13 @@
 from functools import cmp_to_key
 
 
+def equal(v1, v2):
+    for key in set(v1) | set(v2):
+        if v1.get(key, 0) != v2.get(key, 0):
+            return False
+    return True
+
+
 def compare(v1, v2):
     lt = False
     gt = False
@@ -18,7 +25,7 @@ sort_key = cmp_to_key(compare)
 
 
 def is_concurrent(v1, v2):
-    return v1 != v2 and compare(v1, v2) == 0
+    return not equal(v1, v2) and compare(v1, v2) == 0
 
 
 def greater_than(v1, v2):
@@ -26,7 +33,7 @@ def greater_than(v1, v2):
 
 
 def geq(v1, v2):
-    return v1 == v2 or compare(v1, v2) == 1
+    return equal(v1, v2) or compare(v1, v2) == 1
 
 
 def merge(v1, v2):
@@ -39,6 +46,12 @@ def merge(v1, v2):
 def increment(v, id):
     u = v.copy()
     u[id] = u.get(id, 0) + 1
+    return u
+
+
+def decrement(v, id):
+    u = v.copy()
+    u[id] = u.get(id, 0) - 1
     return u
 
 
