@@ -73,12 +73,12 @@ class Replica:
         # apply updates if possible
         h = True
         unprocessed = self.log
+        # heuristics for sorting vector clocks
+        unprocessed.sort(key=lambda x: (vc.sort_key(x.ts), len(x.ts), sum(x.ts.values()), x.id))
         log = []
         while h:
             h = False
             b = []
-            # heuristics for sorting the vector clocks
-            unprocessed.sort(key=lambda x: (vc.sort_key(x.ts), len(x.ts), sum(x.ts.values()), x.id))
             for u in unprocessed:
                 if u.id in seen:
                     continue
@@ -93,7 +93,6 @@ class Replica:
             unprocessed = b
         log.extend(unprocessed)
         self.log = log
-        print(self.id, self.ts, len(self.log))
 
     # exposed methods
 
