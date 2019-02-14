@@ -1,4 +1,4 @@
-from time import sleep, time
+from time import sleep
 from itertools import chain, islice
 from contextlib import contextmanager
 from random import random
@@ -77,7 +77,8 @@ class Replica:
         while h:
             h = False
             b = []
-            unprocessed.sort(key=lambda x: (vc.sort_key(x.ts), x.time))
+            # heuristics for sorting the vector clocks
+            unprocessed.sort(key=lambda x: (vc.sort_key(x.ts), len(x.ts), sum(x.ts.values()), x.id))
             for u in unprocessed:
                 if u.id in seen:
                     continue
@@ -131,7 +132,7 @@ class Replica:
             prev = ts.copy()
             self.sync_ts = vc.increment(self.sync_ts, self.id)
             ts[self.id] = self.sync_ts[self.id]
-            u = Update(generate_id(15), *update, self.id, ts, time())
+            u = Update(generate_id(8), *update, self.id, ts)
 
             # apply update immediately if possible
             self.log.append(u)
