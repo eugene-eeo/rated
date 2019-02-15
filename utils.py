@@ -27,11 +27,6 @@ def ignore_disconnects():
 
 
 def sort_buffer(buffer):
-    buffer.sort(key=lambda u: u.id)
-    # remove duplicate events
-    for i in range(len(buffer) - 1, 0, -1):
-        if buffer[i].id == buffer[i-1].id:
-            del buffer[i]
     buffer.sort(key=lambda u: (vc.sort_key(u.prev), u.id))
 
 

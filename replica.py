@@ -88,7 +88,7 @@ class Replica:
             self.ts = self.checkpoint_ts
         self.ts, order, unprocessed = apply_updates(self.ts, self.db, self.buffer)
         self.log.extend(order)
-        self.checkpoint_db = deepcopy(self.db)
+        self.checkpoint_db = self.db
         self.checkpoint_ts = self.ts
         self.buffer = unprocessed
 
