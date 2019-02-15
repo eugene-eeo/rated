@@ -7,7 +7,7 @@ from random import random
 import Pyro4
 from models import Update
 from threading import Lock, Thread
-from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer
+from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, need_reconstruction
 import vector_clock as vc
 
 
@@ -49,16 +49,11 @@ class Replica:
             yield peer
 
     def gossip(self):
-        n = 10
         while True:
-            n -= 1
             with self.lock:
                 if self.has_new_gossip:
                     self.has_new_gossip = False
                     self.apply_updates()
-                if n == 0:
-                    self.apply_updates(True)
-                    n = 10
             sleep(self.sync_period)
             logs = []
             for peer in islice(self.peers(), 5):
@@ -78,17 +73,24 @@ class Replica:
                     if log:
                         peer.sync(log, ts)
 
-    def apply_updates(self, checkpoint=False):
+    def apply_updates(self):
         sort_buffer(self.buffer)
-        # replay history from checkpoint
-        self.db = deepcopy(self.checkpoint_db)
-        self.ts = self.checkpoint_ts
+        if need_reconstruction(self.buffer, self.ts):
+            self.db = {}
+            self.ts = {}
+            self.log.extend(self.buffer)
+            sort_buffer(self.log)
+            self.buffer = self.log
+            self.log = []
+        else:
+            # replay history from checkpoint
+            self.db = self.checkpoint_db
+            self.ts = self.checkpoint_ts
         self.ts, order, unprocessed = apply_updates(self.ts, self.db, self.buffer)
-        if not unprocessed and checkpoint:
-            self.log.extend(order)
-            self.checkpoint_db = self.db
-            self.checkpoint_ts = self.ts
-            self.buffer = []
+        self.log.extend(order)
+        self.checkpoint_db = deepcopy(self.db)
+        self.checkpoint_ts = self.ts
+        self.buffer = unprocessed
 
     # exposed methods
 

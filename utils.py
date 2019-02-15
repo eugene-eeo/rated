@@ -35,6 +35,13 @@ def sort_buffer(buffer):
     buffer.sort(key=lambda u: (vc.sort_key(u.prev), u.id))
 
 
+def need_reconstruction(buffer, ts):
+    for u in buffer:
+        if vc.is_concurrent(u.prev, ts):
+            return True
+    return False
+
+
 def apply_updates(ts, db, log):
     order = []
     while True:
