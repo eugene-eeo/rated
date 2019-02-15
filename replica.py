@@ -1,4 +1,4 @@
-from time import sleep, time
+from time import sleep
 from itertools import chain, islice
 from contextlib import contextmanager
 from copy import deepcopy
@@ -7,7 +7,7 @@ from random import random
 import Pyro4
 from models import Update
 from threading import Lock, Thread
-from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, need_reconstruction
+from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer
 import vector_clock as vc
 
 
@@ -49,11 +49,16 @@ class Replica:
             yield peer
 
     def gossip(self):
+        n = 10
         while True:
+            n -= 1
             with self.lock:
                 if self.has_new_gossip:
                     self.has_new_gossip = False
                     self.apply_updates()
+                if n == 0:
+                    self.apply_updates(True)
+                    n = 10
             sleep(self.sync_period)
             logs = []
             for peer in islice(self.peers(), 5):
@@ -73,29 +78,17 @@ class Replica:
                     if log:
                         peer.sync(log, ts)
 
-    def apply_updates(self):
+    def apply_updates(self, checkpoint=False):
         sort_buffer(self.buffer)
-        if need_reconstruction(self.log, self.buffer):
-            print("Reconstructing")
-            self.db = {}
-            self.ts = vc.create()
-            self.log.extend(self.buffer)
-            self.buffer = self.log
-            self.log = []
-            sort_buffer(self.buffer)
-        else:
-            # replay history from checkpoint
-            self.db = deepcopy(self.checkpoint_db)
-            self.ts = self.checkpoint_ts
-
+        # replay history from checkpoint
+        self.db = deepcopy(self.checkpoint_db)
+        self.ts = self.checkpoint_ts
         self.ts, order, unprocessed = apply_updates(self.ts, self.db, self.buffer)
-        self.log.extend(order)
-        self.checkpoint_db = self.db
-        self.checkpoint_ts = self.ts
-        self.buffer = unprocessed
-
-        for u in order:
-            print(u.id, u.ts)
+        if not unprocessed and checkpoint:
+            self.log.extend(order)
+            self.checkpoint_db = self.db
+            self.checkpoint_ts = self.ts
+            self.buffer = []
 
     # exposed methods
 
@@ -122,9 +115,12 @@ class Replica:
     def get(self, user_id, ts, guarantee=20):
         while True:
             with self.lock:
+                self.apply_updates()
                 # can respond
-                if vc.geq(self.ts, ts) or guarantee <= 0:
+                if vc.geq(self.ts, ts):
                     return self.db.get(user_id, {}), self.ts
+                if guarantee == 0:
+                    raise RuntimError("Cannot retrieve value!")
             sleep(self.sync_period)
             guarantee -= 1
 
@@ -134,11 +130,10 @@ class Replica:
             prev = ts.copy()
             self.sync_ts = vc.increment(self.sync_ts, self.id)
             ts[self.id] = self.sync_ts[self.id]
-            u = Update(generate_id(5), *update, self.id, ts, time())
+            u = Update(generate_id(5), *update, self.id, prev, ts)
 
             # apply update immediately if possible
             self.buffer.append(u)
-            self.apply_updates()
             return ts
 
 
