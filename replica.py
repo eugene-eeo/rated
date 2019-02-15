@@ -79,14 +79,15 @@ class Replica:
         self.ts, order, unprocessed = apply_updates(self.checkpoint_ts, self.db, self.buffer)
         if len(unprocessed) == 0:
             self.log.extend(order)
-            self.checkpoint_db = deepcopy(self.db)
+            self.checkpoint_db = self.db
             self.checkpoint_ts = self.ts
             self.buffer = []
 
-        #print("Updates applied", self.id, self.ts)
-        #for i, u in enumerate(order, 1):
-        #    print(str(i) + "|", u.id, u.ts)
-        #print("=" * 20)
+        if order:
+            print("Updates applied", self.id, self.ts)
+            for i, u in enumerate(order, 1):
+                print(str(i) + "|", u.id, u.ts)
+            print("=" * 20)
 
     # exposed methods
 
@@ -125,7 +126,7 @@ class Replica:
             prev = ts.copy()
             self.sync_ts = vc.increment(self.sync_ts, self.id)
             ts[self.id] = self.sync_ts[self.id]
-            u = Update(generate_id(8), *update, self.id, ts)
+            u = Update(generate_id(5), *update, self.id, ts)
 
             # apply update immediately if possible
             self.buffer.append(u)

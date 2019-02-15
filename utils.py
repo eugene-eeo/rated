@@ -40,6 +40,9 @@ def apply_updates(ts, db, log):
         has_event = False
         next_log = []
         for u in log:
+            # we've seen this value before, throw away!
+            if vc.geq(ts, u.ts):
+                continue
             if vc.geq(ts, vc.decrement(u.ts, u.node_id)):
                 has_event = True
                 u.apply(db)
