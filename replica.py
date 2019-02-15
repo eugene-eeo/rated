@@ -1,4 +1,4 @@
-from time import sleep
+from time import sleep, time
 from itertools import chain, islice
 from contextlib import contextmanager
 from copy import deepcopy
@@ -7,7 +7,7 @@ from random import random
 import Pyro4
 from models import Update
 from threading import Lock, Thread
-from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates
+from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, need_reconstruction
 import vector_clock as vc
 
 
@@ -74,19 +74,28 @@ class Replica:
                         peer.sync(log, ts)
 
     def apply_updates(self):
-        # replay history from checkpoint
-        self.db = deepcopy(self.checkpoint_db)
-        self.ts = self.checkpoint_ts
-        self.ts, order, has_unprocessed = apply_updates(self.ts, self.db, self.buffer)
-        if not has_unprocessed:
-            self.log.extend(order)
-            self.checkpoint_db = self.db
-            self.checkpoint_ts = self.ts
-            self.buffer = []
+        sort_buffer(self.buffer)
+        if need_reconstruction(self.log, self.buffer):
+            print("Reconstructing")
+            self.db = {}
+            self.ts = vc.create()
+            self.log.extend(self.buffer)
+            self.buffer = self.log
+            self.log = []
+            sort_buffer(self.buffer)
+        else:
+            # replay history from checkpoint
+            self.db = deepcopy(self.checkpoint_db)
+            self.ts = self.checkpoint_ts
 
-        if order:
-            for i, u in enumerate(order, 1):
-                print(u.id, u.ts)
+        self.ts, order, unprocessed = apply_updates(self.ts, self.db, self.buffer)
+        self.log.extend(order)
+        self.checkpoint_db = self.db
+        self.checkpoint_ts = self.ts
+        self.buffer = unprocessed
+
+        for u in order:
+            print(u.id, u.ts)
 
     # exposed methods
 
@@ -125,7 +134,7 @@ class Replica:
             prev = ts.copy()
             self.sync_ts = vc.increment(self.sync_ts, self.id)
             ts[self.id] = self.sync_ts[self.id]
-            u = Update(generate_id(5), *update, self.id, ts)
+            u = Update(generate_id(5), *update, self.id, ts, time())
 
             # apply update immediately if possible
             self.buffer.append(u)

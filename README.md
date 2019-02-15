@@ -14,5 +14,5 @@ $ for i in $(seq 10); do
 
 ## todo
 
- - [ ] sync state for new peers
- - [ ] compress logs
+ - [x] checkpointing (efficient sync)
+ - [ ] log compaction

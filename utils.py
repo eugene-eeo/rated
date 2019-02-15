@@ -26,16 +26,25 @@ def ignore_disconnects():
         pass
 
 
-def apply_updates(ts, db, log):
-    log.sort(key=lambda x: (vc.sort_key(x.ts), x.id))
-
+def sort_buffer(buffer):
+    buffer.sort(key=lambda u: (vc.sort_key(u.ts), u.time))
     # remove duplicate events
-    for i in range(len(log) - 1, 0, -1):
-        if log[i].id == log[i-1].id:
-            del log[i]
+    for i in range(len(buffer) - 1, 0, -1):
+        if buffer[i].id == buffer[i-1].id:
+            del buffer[i]
 
+
+def need_reconstruction(log, buffer):
+    if not log:
+        return False
+    return (
+        vc.is_concurrent(log[-1].ts, buffer[0].ts)
+        and log[-1].time > buffer[0].time
+        )
+
+
+def apply_updates(ts, db, log):
     order = []
-
     while True:
         has_event = False
         next_log = []
@@ -53,5 +62,4 @@ def apply_updates(ts, db, log):
         log = next_log
         if not has_event:
             break
-
-    return ts, order, bool(log)
+    return ts, order, log
