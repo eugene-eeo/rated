@@ -74,20 +74,19 @@ class Replica:
                         peer.sync(log, ts)
 
     def apply_updates(self):
-        # replay history
+        # replay history from checkpoint
         self.db = deepcopy(self.checkpoint_db)
-        self.ts, order, unprocessed = apply_updates(self.checkpoint_ts, self.db, self.buffer)
-        if len(unprocessed) == 0:
+        self.ts = self.checkpoint_ts
+        self.ts, order, has_unprocessed = apply_updates(self.ts, self.db, self.buffer)
+        if not has_unprocessed:
             self.log.extend(order)
             self.checkpoint_db = self.db
             self.checkpoint_ts = self.ts
             self.buffer = []
 
         if order:
-            print("Updates applied", self.id, self.ts)
             for i, u in enumerate(order, 1):
-                print(str(i) + "|", u.id, u.ts)
-            print("=" * 20)
+                print(u.id, u.ts)
 
     # exposed methods
 

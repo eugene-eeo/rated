@@ -54,4 +54,4 @@ def apply_updates(ts, db, log):
         if not has_event:
             break
 
-    return ts, order, log
+    return ts, order, bool(log)
