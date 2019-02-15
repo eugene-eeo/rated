@@ -38,6 +38,9 @@ class Session:
         self.help()
         while True:
             option = input("> ").strip().lower()
+            if option == "q":
+                break
+            print("-" * 40)
             if option == "o":
                 self.read_other()
             elif option == "r":
@@ -46,35 +49,28 @@ class Session:
                 self.update_own()
             elif option == "?":
                 self.help()
-            elif option == "q":
-                break
+            print("-" * 40)
 
     def read_other(self):
-        print("-" * 40)
         print("read Other user's ratings:")
         user_id = get_integer("User ID (Integer): ")
         print("Movie ID     Rating")
         print("========     ======")
         for movie_id, rating in self.frontend.get_ratings(user_id).items():
             print("{0: >8}     {1: >6}".format(movie_id, rating))
-        print("-" * 40)
 
     def read_own(self):
-        print("-" * 40)
         print("Read ratings:")
         print("Movie ID     Rating")
         print("========     ======")
         for movie_id, rating in self.frontend.get_ratings(self.user_id).items():
             print("{0: >8}     {1: >6}".format(movie_id, rating))
-        print("-" * 40)
 
     def update_own(self):
-        print("-" * 40)
         print("Update ratings:")
         movie_id = get_integer("Movie ID (Integer): ")
         rating   = get_rating("Rating (0-5): ")
         self.frontend.add_rating(self.user_id, movie_id, rating)
-        print("-" * 40)
 
 
 def main():
