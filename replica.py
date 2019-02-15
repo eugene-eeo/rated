@@ -1,4 +1,4 @@
-from time import sleep
+from time import sleep, time
 from itertools import chain, islice
 from contextlib import contextmanager
 from copy import deepcopy
@@ -75,7 +75,7 @@ class Replica:
 
     def apply_updates(self):
         sort_buffer(self.buffer)
-        if need_reconstruction(self.buffer, self.ts):
+        if need_reconstruction(self.log, self.buffer, self.ts):
             self.db = {}
             self.ts = {}
             self.log.extend(self.buffer)
@@ -132,10 +132,11 @@ class Replica:
             prev = ts.copy()
             self.sync_ts = vc.increment(self.sync_ts, self.id)
             ts[self.id] = self.sync_ts[self.id]
-            u = Update(generate_id(5), *update, self.id, prev, ts)
+            u = Update(generate_id(5), *update, self.id, prev, ts, time())
 
             # apply update immediately if possible
             self.buffer.append(u)
+            self.apply_updates()
             return ts
 
 

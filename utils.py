@@ -27,12 +27,13 @@ def ignore_disconnects():
 
 
 def sort_buffer(buffer):
-    buffer.sort(key=lambda u: (vc.sort_key(u.prev), u.id))
+    buffer.sort(key=lambda u: (vc.sort_key(u.prev), u.time, u.id))
 
 
-def need_reconstruction(buffer, ts):
+def need_reconstruction(log, buffer, ts):
+    t = max(u.time for u in log) if log else 0
     for u in buffer:
-        if vc.is_concurrent(u.prev, ts):
+        if vc.is_concurrent(u.prev, ts) and u.time < t:
             return True
     return False
 
