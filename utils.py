@@ -27,7 +27,7 @@ def ignore_disconnects():
 
 
 def apply_updates(ts, db, log):
-    log.sort(key=lambda x: vc.sort_key(x.ts))
+    log.sort(key=lambda x: (vc.sort_key(x.ts), x.id))
 
     # remove duplicate events
     for i in range(len(log) - 1, 0, -1):
