@@ -108,7 +108,6 @@ class Replica:
     def get(self, user_id, ts, guarantee=20):
         while True:
             with self.lock:
-                self.apply_updates()
                 # can respond
                 if vc.geq(self.ts, ts):
                     return self.db.get(user_id, {}), self.ts
