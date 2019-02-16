@@ -31,8 +31,10 @@ def sort_buffer(buffer):
 
 
 def need_reconstruction(log, buffer, ts):
+    t = log[-1].time if log else 0
+    i = log[-1].id   if log else ""
     for u in buffer:
-        if vc.is_concurrent(u.prev, ts):
+        if vc.is_concurrent(u.prev, ts) and (t > u.time or i > u.id):
             return True
     return False
 
