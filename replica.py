@@ -1,7 +1,6 @@
 from time import sleep, time
 from itertools import chain, islice
 from contextlib import contextmanager
-from copy import deepcopy
 from random import random
 
 import Pyro4
@@ -20,8 +19,6 @@ class Replica:
         self.log = []
         self.ts = vc.create() # timestamp of state
         self._lock = Lock()
-        self.checkpoint_ts = self.ts
-        self.checkpoint_db = {}
         self.buffer = []
         # gossip
         self.busy = False
@@ -62,7 +59,7 @@ class Replica:
                     with self.lock:
                         # check if we need to go back past the checkpoint
                         log = (
-                            self.buffer if vc.greater_than(t, self.checkpoint_ts) else
+                            self.buffer if vc.greater_than(t, self.ts) else
                             chain(self.log, self.buffer)
                             )
                         events = [u for u in log if vc.is_concurrent(u.ts, t) or vc.greater_than(u.ts, t)]
@@ -82,14 +79,8 @@ class Replica:
             sort_buffer(self.log)
             self.buffer = self.log
             self.log = []
-        else:
-            # replay history from checkpoint
-            self.db = self.checkpoint_db
-            self.ts = self.checkpoint_ts
         self.ts, order, unprocessed = apply_updates(self.ts, self.db, self.buffer)
         self.log.extend(order)
-        self.checkpoint_db = self.db
-        self.checkpoint_ts = self.ts
         self.buffer = unprocessed
 
     # exposed methods
