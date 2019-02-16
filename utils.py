@@ -22,7 +22,7 @@ def find_random_peers(ns, id, metadata):
 def ignore_disconnects():
     try:
         yield
-    except (ConnectionClosedError, CommunicationError, TimeoutError):
+    except (ConnectionError, ConnectionClosedError, CommunicationError, TimeoutError):
         pass
 
 

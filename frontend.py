@@ -1,4 +1,5 @@
 import Pyro4
+import time
 import random
 from vector_clock import merge, create
 from utils import ignore_disconnects
@@ -13,22 +14,25 @@ class Frontend:
 
     def list_replicas(self):
         with self.ns:
-            return self.ns.list(metadata_all={"replica"}).values()
+            return list(self.ns.list(metadata_all={"replica"}).values())
 
     @property
     def replica(self):
         # try to get primary
         with ignore_disconnects():
-            if self._replica and self._replica.available():
+            if self._replica is not None and self._replica.available():
                 return self._replica
         # try random replicas
-        uris = list(self.list_replicas())
+        uris = self.list_replicas()
         random.shuffle(uris)
-        for uri in uris:
-            with ignore_disconnects():
-                replica = Pyro4.Proxy(uri)
-                self._replica = replica
-                return self._replica
+        for _ in range(3):
+            for uri in uris:
+                with ignore_disconnects():
+                    replica = Pyro4.Proxy(uri)
+                    if replica.available():
+                        self._replica = replica
+                        return self._replica
+            time.sleep(0.05)
         raise RuntimeError("No replica available")
 
     @Pyro4.expose
