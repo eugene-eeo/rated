@@ -13,6 +13,7 @@ def d_sort(v):
 
 
 r = Proxy(locateNS().lookup("replica:%s" % sys.argv[1])).get_log()[1]
+m = min(u[-1] for u in r) if r else 0
 for u in r:
     u = Update(*u)
-    print(u.id, u.node_id, d_sort(u.ts))
+    print(u.id, d_sort(u.ts), format(u.time - m, ".2f"))

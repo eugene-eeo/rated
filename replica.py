@@ -119,9 +119,10 @@ class Replica:
     @Pyro4.expose
     def update(self, update, ts):
         with self.lock:
+            prev = ts.copy()
             self.sync_ts = vc.increment(self.sync_ts, self.id)
             ts[self.id] = self.sync_ts[self.id]
-            u = Update(generate_id(5), *update, self.id, self.sync_ts, time())
+            u = Update(generate_id(5), *update, prev, ts, time())
 
             # apply update immediately if possible
             self.buffer.append(u)
