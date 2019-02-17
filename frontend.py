@@ -22,10 +22,10 @@ class Frontend:
         with ignore_disconnects():
             if self._replica is not None and self._replica.available():
                 return self._replica
-        # try random replicas
-        uris = self.list_replicas()
-        random.shuffle(uris)
         for _ in range(3):
+            # try random replicas
+            uris = self.list_replicas()
+            random.shuffle(uris)
             for uri in uris:
                 with ignore_disconnects():
                     replica = Pyro4.Proxy(uri)

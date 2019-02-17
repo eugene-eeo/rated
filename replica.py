@@ -112,7 +112,7 @@ class Replica:
                 if vc.geq(self.ts, ts):
                     return self.db.get(user_id, {}), self.ts
                 if guarantee == 0:
-                    raise RuntimError("Cannot retrieve value!")
+                    raise RuntimeError("Cannot retrieve value!")
             sleep(self.sync_period)
             guarantee -= 1
 
