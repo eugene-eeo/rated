@@ -27,14 +27,14 @@ def ignore_disconnects():
 
 
 def sort_buffer(buffer):
-    buffer.sort(key=lambda u: (vc.sort_key(u.prev), u.time, u.id))
+    buffer.sort(key=lambda u: (vc.sort_key(u.dep()), u.time, u.id))
 
 
 def need_reconstruction(log, buffer, ts):
     t = log[-1].time if log else 0
     i = log[-1].id   if log else ""
     for u in buffer:
-        if vc.is_concurrent(u.prev, ts) and (t > u.time or i > u.id):
+        if vc.is_concurrent(u.dep(), ts) and (t > u.time or i > u.id):
             return True
     return False
 
@@ -48,7 +48,7 @@ def apply_updates(ts, db, log):
             # we've seen this value before, throw away!
             if vc.geq(ts, u.ts):
                 continue
-            if vc.geq(ts, u.prev):
+            if vc.geq(ts, u.dep()):
                 has_event = True
                 u.apply(db)
                 ts = vc.merge(ts, u.ts)
