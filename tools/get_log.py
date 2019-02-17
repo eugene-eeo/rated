@@ -1,6 +1,5 @@
 import sys
 from Pyro4 import Proxy, locateNS
-from models import Update
 
 
 def d_sort(v):
@@ -15,5 +14,4 @@ def d_sort(v):
 r = Proxy(locateNS().lookup("replica:%s" % sys.argv[1])).get_log()[1]
 m = min(u[-1] for u in r) if r else 0
 for u in r:
-    u = Update(*u)
-    print(u.id, d_sort(u.ts), format(u.time - m, ".2f"))
+    print(u[0], d_sort(u[-2]), format(u[-1] - m, ".2f"))
