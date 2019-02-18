@@ -1,0 +1,26 @@
+#!/bin/bash
+
+rm log.*
+ids=$(./tools/get_ids)
+
+# do some writes first
+for id in $ids; do
+    python tools/bombard.py $id &
+done
+
+for _ in $(seq 1 5); do
+    python tools/bombard2.py &
+done
+
+# wait for jobs to complete
+wait
+
+# check for causal consistency
+sleep 8
+./tools/get_logs
+./tools/check_causal_consistency
+
+# wait for replica sync and reconstruction
+sleep 30
+./tools/get_logs
+./tools/check_global_consistency

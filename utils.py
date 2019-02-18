@@ -8,7 +8,7 @@ import vector_clock as vc
 
 
 def generate_id(l=10):
-    return b64encode(uuid4().bytes).decode()[:-2][:l]
+    return b64encode(uuid4().bytes, altchars=b"+-").decode()[:-2][:l]
 
 
 def find_random_peers(ns, id, metadata):
@@ -27,32 +27,24 @@ def ignore_disconnects():
 
 
 def sort_buffer(buffer):
-    buffer.sort(key=lambda u: (vc.sort_key(u.ts), u.time, u.id))
+    buffer.sort(key=lambda u: (u.time, u.id))
 
 
-def need_reconstruction(log, buffer, ts):
-    t = log[-1].time if log else 0
-    i = log[-1].id   if log else ""
-    for u in buffer:
-        if vc.is_concurrent(u.prev, ts) and (t > u.time or i > u.id):
-            return True
-    return False
-
-
-def apply_updates(ts, db, log):
+def apply_updates(ts, db, executed, log):
     order = []
     while True:
         has_event = False
         next_log = []
         for u in log:
             # we've seen this value before, throw away!
-            if vc.geq(ts, u.ts):
+            if u.id in executed:
                 continue
             if vc.geq(ts, u.prev):
                 has_event = True
                 u.apply(db)
                 ts = vc.merge(ts, u.ts)
                 order.append(u)
+                executed.add(u.id)
                 continue
             next_log.append(u)
         log = next_log

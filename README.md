@@ -12,6 +12,12 @@ $ for i in $(seq 10); do
 > done
 ```
 
+## testing
+
+```bash
+$ tools/test_all
+```
+
 ## todo
 
  - [x] checkpointing (efficient sync)

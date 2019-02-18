@@ -6,7 +6,7 @@ from random import random
 import Pyro4
 from models import Update
 from threading import Lock, Thread
-from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, need_reconstruction
+from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer
 import vector_clock as vc
 
 
@@ -25,6 +25,7 @@ class Replica:
         self.sync_period = 2
         self.sync_ts = vc.create() # timestamp of replica
         self.has_new_gossip = False
+        self.executed = set()
 
     @property
     @contextmanager
@@ -46,11 +47,18 @@ class Replica:
             yield peer
 
     def gossip(self):
+        n = 0
         while True:
+            n += 1
             with self.lock:
                 if self.has_new_gossip:
                     self.has_new_gossip = False
                     self.apply_updates()
+                # every ~10 rounds we apply a global order
+                # to the updates
+                elif n >= 10 and not self.has_new_gossip and not self.buffer:
+                    self.reconstruct()
+                    n = 0
             sleep(self.sync_period)
             logs = []
             for peer in islice(self.peers(), 5):
@@ -70,16 +78,16 @@ class Replica:
                     if log:
                         peer.sync(log, ts)
 
+    def reconstruct(self):
+        self.ts = {}
+        self.db.clear()
+        self.executed.clear()
+        self.log, self.buffer = [], self.log
+        self.apply_updates()
+
     def apply_updates(self):
         sort_buffer(self.buffer)
-        if need_reconstruction(self.log, self.buffer, self.ts):
-            self.db = {}
-            self.ts = {}
-            self.log.extend(self.buffer)
-            sort_buffer(self.log)
-            self.buffer = self.log
-            self.log = []
-        self.ts, order, unprocessed = apply_updates(self.ts, self.db, self.buffer)
+        self.ts, order, unprocessed = apply_updates(self.ts, self.db, self.executed, self.buffer)
         self.log.extend(order)
         self.buffer = unprocessed
 
