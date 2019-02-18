@@ -20,5 +20,8 @@ $ tools/test_all
 
 ## todo
 
- - [x] checkpointing (efficient sync)
+ - [x] lazy for creating ratings
+ - [ ] primary election system (least-id-wins)
+ - [ ] fast way to get primary
+ - [ ] primary for total writes (updates)
  - [ ] log compaction
