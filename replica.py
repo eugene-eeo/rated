@@ -75,7 +75,8 @@ class Replica:
                             self.buffer if vc.greater_than(t, self.ts) else
                             chain(self.log, self.buffer)
                             )
-                        events = [u for u in log if vc.is_concurrent(u.ts, t) or vc.greater_than(u.ts, t)]
+                        # get all events which are concurrent or greater than
+                        events = [u for u in log if vc.compare(u.ts, t) >= 0]
                         logs.append((peer, self.sync_ts, events))
             # now send events
             for peer, ts, log in logs:
@@ -101,7 +102,7 @@ class Replica:
     def status(self):
         if not self.is_online:
             return 'offline'
-        if self.busy:
+        if self.busy or random() <= 0.25:
             return 'overloaded'
         return 'online'
 
