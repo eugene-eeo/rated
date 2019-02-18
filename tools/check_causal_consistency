@@ -23,10 +23,10 @@ def merge(v1, v2):
 
 for file in glob.glob('log.*'):
     with open(file, mode='r') as fp:
-        log = [json.loads(line.rstrip()) for line in fp]
         seen = set()
         ts = {}
-        for entry in log:
+        for line in fp:
+            entry = json.loads(line.rstrip())
             # ts >= u.prev
             assert compare(ts, entry["prev"]) > -1
             # not executed twice

@@ -10,6 +10,9 @@ from utils import generate_id, find_random_peers, ignore_disconnects, apply_upda
 import vector_clock as vc
 
 
+PRIMARY_ID = "_"
+
+
 class Replica:
     def __init__(self):
         self.id = generate_id(5)
@@ -18,6 +21,7 @@ class Replica:
         self.db = {}
         self.log = []
         self.ts = vc.create() # timestamp of state
+        self.executed = set()
         self._lock = Lock()
         self.buffer = []
         # gossip
@@ -26,8 +30,8 @@ class Replica:
         self.sync_ts = vc.create() # timestamp of replica
         self.has_new_gossip = False
         self.need_reconstruct = False
-        self.executed = set()
         self.is_online = True
+        self.forced = {}
 
     @property
     @contextmanager
@@ -58,9 +62,9 @@ class Replica:
                     self.need_reconstruct = True
                     self.has_new_gossip = False
                     self.apply_updates()
-                # every ~10 rounds we apply a global order
-                # to the updates
-                elif n >= 10 and not self.buffer and self.need_reconstruct:
+                    n = 0
+                # every 5 rounds we apply a global order to the updates
+                elif n >= 5 and not self.buffer and self.need_reconstruct:
                     self.need_reconstruct = False
                     self.reconstruct()
                     n = 0
@@ -70,6 +74,8 @@ class Replica:
                 with ignore_disconnects():
                     t = peer.get_timestamp()
                     with self.lock:
+                        if t == self.sync_ts:
+                            continue
                         # check if we need to go back past the checkpoint
                         log = (
                             self.buffer if vc.greater_than(t, self.ts) else
@@ -96,7 +102,45 @@ class Replica:
         self.ts, self.buffer = apply_updates(self.ts, self.db, self.executed,
                                              self.log, self.buffer)
 
+    def forced_update(self, u, patience=5):
+        # find all the peers
+        with self.ns:
+            uris = find_random_peers(self.ns, self.id, "replica")
+        told = set()
+        while True:
+            for uri in set(uris) - told:
+                peer = Pyro4.Proxy(uri)
+                with ignore_disconnects(), peer:
+                    if peer.status() == 'online':
+                        peer.sync_forced(u)
+                        told.add(uri)
+            if len(told) == len(uris):
+                break
+            patience -= 1
+            if patience == 0:
+                raise RuntimeError("cannot apply forced update!")
+            # give time to recover
+            sleep(self.sync_period / 2)
+        # ack
+        for uri in told:
+            with Pyro4.Proxy(uri) as peer:
+                peer.commit_forced(u.id)
+
     # exposed methods
+
+    @Pyro4.expose
+    def sync_forced(self, u):
+        with self.lock:
+            u = Update(*u)
+            self.forced[u.id] = u
+
+    @Pyro4.expose
+    def commit_forced(self, id):
+        with self.lock:
+            self.buffer.append(self.forced[id])
+            self.apply_updates()
+            self.sync_ts[PRIMARY_ID] = self.forced[id].ts[PRIMARY_ID]
+            del self.forced[id]
 
     @Pyro4.expose
     def status(self):
@@ -134,14 +178,23 @@ class Replica:
             guarantee -= 1
 
     @Pyro4.expose
-    def update(self, update, ts):
+    def update(self, update, ts, forced=False):
         with self.lock:
             prev = ts.copy()
-            self.sync_ts = vc.increment(self.sync_ts, self.id)
-            ts[self.id] = self.sync_ts[self.id]
+            new_sync_ts = vc.increment(self.sync_ts, self.id)
+            ts[self.id] = new_sync_ts[self.id]
+
+            # don't forget to increment PRIMARY_ID on forced updates
+            if forced:
+                new_sync_ts = vc.increment(self.sync_ts, PRIMARY_ID)
+                ts[PRIMARY_ID] = new_sync_ts[PRIMARY_ID]
+
             u = Update(generate_id(5), *update, prev, ts, time())
 
-            # apply update immediately if possible
+            if forced:
+                self.forced_update(u)
+            # commit changes and apply update immediately if possible
+            self.sync_ts = new_sync_ts
             self.need_reconstruct = True
             self.buffer.append(u)
             self.apply_updates()

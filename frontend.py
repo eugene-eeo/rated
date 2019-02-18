@@ -5,10 +5,56 @@ from vector_clock import merge, create
 from utils import ignore_disconnects
 
 
-@Pyro4.behavior(instance_mode="session")
-class Frontend:
+PRIMARY_ID = "_"
+
+
+class PrimaryFinder:
     def __init__(self):
         self.ns = Pyro4.locateNS()
+        self.ts = {PRIMARY_ID: 0}
+        self._primary = None
+        self._find_primary_ts()
+
+    def _find_primary_ts(self):
+        with self.ns:
+            uris = list(self.ns.list(metadata_all={"replica"}).values())
+            uris.sort()
+        for uri in uris:
+            with ignore_disconnects():
+                replica = Pyro4.Proxy(uri)
+                if replica.status() == 'online':
+                    self.ts[PRIMARY_ID] = max(self.ts[PRIMARY_ID], replica.get_timestamp().get(PRIMARY_ID, 0))
+                    if self._primary is None:
+                        self._primary = replica
+
+    def merge(self, ts):
+        self.ts = merge(ts, self.ts)
+
+    @property
+    def primary(self):
+        with ignore_disconnects():
+            if self._primary and self._primary.status() != 'offline':
+                return self._primary
+        for _ in range(3):
+            with self.ns:
+                uris = list(self.ns.list(metadata_all={"replica"}).values())
+                uris.sort()
+            for uri in uris:
+                with ignore_disconnects():
+                    replica = Pyro4.Proxy(uri)
+                    if replica.status() != 'offline':
+                        self._primary = replica
+                        return replica
+            time.sleep(0.05)
+        raise RuntimeError("Cannot find primary!")
+
+
+@Pyro4.behavior(instance_mode="session")
+class Frontend:
+    pf = PrimaryFinder()
+
+    def __init__(self):
+        self.ns = self.pf.ns
         self.ts = create()
         self._replica = None
 
@@ -49,6 +95,16 @@ class Frontend:
     def add_rating(self, user_id, movie_id, value):
         ts = self.replica.update((user_id, movie_id, value), self.ts)
         self.ts = merge(ts, self.ts)
+
+    @Pyro4.expose
+    def add_rating_sync(self, user_id, movie_id, value):
+        ts = self.pf.primary.update(
+            (user_id, movie_id, value),
+            merge(self.ts, self.pf.ts),
+            forced=True,
+            )
+        self.ts = merge(ts, self.ts)
+        self.pf.ts[PRIMARY_ID] = ts[PRIMARY_ID]
 
 
 if __name__ == '__main__':

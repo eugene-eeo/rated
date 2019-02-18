@@ -21,7 +21,6 @@ $ tools/test_all
 ## todo
 
  - [x] lazy for creating ratings
- - [ ] primary election system (least-id-wins)
- - [ ] fast way to get primary
- - [ ] primary for total writes (updates)
+ - [x] primary decided by frontend (least-id-wins)
+ - [x] primary for forced updates
  - [ ] log compaction
