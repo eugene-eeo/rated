@@ -25,6 +25,7 @@ class Replica:
         self.sync_period = 2
         self.sync_ts = vc.create() # timestamp of replica
         self.has_new_gossip = False
+        self.need_reconstruct = False
         self.executed = set()
 
     @property
@@ -52,11 +53,13 @@ class Replica:
             n += 1
             with self.lock:
                 if self.has_new_gossip:
+                    self.need_reconstruct = True
                     self.has_new_gossip = False
                     self.apply_updates()
                 # every ~10 rounds we apply a global order
                 # to the updates
-                elif n >= 10 and not self.has_new_gossip and not self.buffer:
+                elif n >= 10 and not self.buffer and self.need_reconstruct:
+                    self.need_reconstruct = False
                     self.reconstruct()
                     n = 0
             sleep(self.sync_period)
@@ -132,6 +135,7 @@ class Replica:
             u = Update(generate_id(5), *update, prev, ts, time())
 
             # apply update immediately if possible
+            self.need_reconstruct = True
             self.buffer.append(u)
             self.apply_updates()
             return ts
