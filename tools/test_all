@@ -23,4 +23,5 @@ sleep 8
 # wait for replica sync and reconstruction
 sleep 30
 ./tools/get_logs
+./tools/check_causal_consistency
 ./tools/check_global_consistency

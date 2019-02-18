@@ -2,6 +2,7 @@ from base64 import b64encode
 from contextlib import contextmanager
 from copy import deepcopy
 from random import shuffle
+from operator import attrgetter
 from uuid import uuid4
 from Pyro4.errors import ConnectionClosedError, CommunicationError, TimeoutError
 import vector_clock as vc
@@ -27,15 +28,15 @@ def ignore_disconnects():
 
 
 def sort_buffer(buffer):
-    buffer.sort(key=lambda u: (u.time, u.id))
+    buffer.sort(key=attrgetter("time", "id"))
 
 
-def apply_updates(ts, db, executed, log):
-    order = []
-    while True:
+def apply_updates(ts, db, executed, log, buffer):
+    has_event = True
+    while has_event:
         has_event = False
-        next_log = []
-        for u in log:
+        next_buff = []
+        for u in buffer:
             # we've seen this value before, throw away!
             if u.id in executed:
                 continue
@@ -43,11 +44,9 @@ def apply_updates(ts, db, executed, log):
                 has_event = True
                 u.apply(db)
                 ts = vc.merge(ts, u.ts)
-                order.append(u)
                 executed.add(u.id)
+                log.append(u)
                 continue
-            next_log.append(u)
-        log = next_log
-        if not has_event:
-            break
-    return ts, order, log
+            next_buff.append(u)
+        buffer = next_buff
+    return ts, buffer

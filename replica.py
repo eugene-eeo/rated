@@ -87,9 +87,8 @@ class Replica:
 
     def apply_updates(self):
         sort_buffer(self.buffer)
-        self.ts, order, unprocessed = apply_updates(self.ts, self.db, self.executed, self.buffer)
-        self.log.extend(order)
-        self.buffer = unprocessed
+        self.ts, self.buffer = apply_updates(self.ts, self.db, self.executed,
+                                             self.log, self.buffer)
 
     # exposed methods
 
