@@ -20,7 +20,7 @@ class Frontend:
     def replica(self):
         # try to get primary
         with ignore_disconnects():
-            if self._replica is not None and self._replica.available():
+            if self._replica is not None and self._replica.status() == 'online':
                 return self._replica
         for _ in range(3):
             # try random replicas
@@ -29,7 +29,7 @@ class Frontend:
             for uri in uris:
                 with ignore_disconnects():
                     replica = Pyro4.Proxy(uri)
-                    if replica.available():
+                    if replica.status() == 'online':
                         self._replica = replica
                         return self._replica
             time.sleep(0.05)

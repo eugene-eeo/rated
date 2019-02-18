@@ -17,10 +17,8 @@ def compare(v1, v2):
 
 
 def merge(v1, v2):
-    v3 = v1.copy()
     for key, value in v2.items():
-        v3[key] = max(value, v1.get(key, 0))
-    return v3
+        v1[key] = max(value, v1.get(key, 0))
 
 
 for file in glob.glob('log.*'):
@@ -34,5 +32,5 @@ for file in glob.glob('log.*'):
             # not executed twice
             assert entry["id"] not in seen
 
-            ts = merge(ts, entry["ts"])
+            merge(ts, entry["ts"])
             seen.add(entry["id"])

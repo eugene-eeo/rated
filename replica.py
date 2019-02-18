@@ -27,6 +27,7 @@ class Replica:
         self.has_new_gossip = False
         self.need_reconstruct = False
         self.executed = set()
+        self.is_online = True
 
     @property
     @contextmanager
@@ -42,7 +43,7 @@ class Replica:
         for peer in peers:
             peer = Pyro4.Proxy(peer)
             with ignore_disconnects():
-                if not peer.available():
+                if peer.status() != 'online':
                     peer._pyroRelease()
                     continue
             yield peer
@@ -52,6 +53,7 @@ class Replica:
         while True:
             n += 1
             with self.lock:
+                self.is_online = random() <= 0.75
                 if self.has_new_gossip:
                     self.need_reconstruct = True
                     self.has_new_gossip = False
@@ -96,8 +98,12 @@ class Replica:
     # exposed methods
 
     @Pyro4.expose
-    def available(self):
-        return not self.busy and random() <= 0.75
+    def status(self):
+        if not self.is_online:
+            return 'offline'
+        if self.busy:
+            return 'overloaded'
+        return 'online'
 
     @Pyro4.expose
     def sync(self, log, ts):
