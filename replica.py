@@ -63,8 +63,8 @@ class Replica:
                     self.has_new_gossip = False
                     self.apply_updates()
                     n = 0
-                # every 5 rounds we apply a global order to the updates
-                elif n >= 5 and not self.buffer and self.need_reconstruct:
+                # relax 5 rounds and apply a global order to the updates
+                elif n >= 5 and self.need_reconstruct:
                     self.need_reconstruct = False
                     self.reconstruct()
                     n = 0
@@ -94,7 +94,9 @@ class Replica:
         self.ts = {}
         self.db.clear()
         self.executed.clear()
-        self.log, self.buffer = [], self.log
+        self.log.extend(self.buffer)
+        self.buffer = self.log
+        self.log = []
         self.apply_updates()
 
     def apply_updates(self):
@@ -111,7 +113,7 @@ class Replica:
             for uri in set(uris) - told:
                 peer = Pyro4.Proxy(uri)
                 with ignore_disconnects(), peer:
-                    if peer.status() == 'online':
+                    if peer.status() != 'offline':
                         peer.sync_forced(u)
                         told.add(uri)
             if len(told) == len(uris):
@@ -181,13 +183,9 @@ class Replica:
     def update(self, update, ts, forced=False):
         with self.lock:
             prev = ts.copy()
-            new_sync_ts = vc.increment(self.sync_ts, self.id)
-            ts[self.id] = new_sync_ts[self.id]
-
-            # don't forget to increment PRIMARY_ID on forced updates
-            if forced:
-                new_sync_ts = vc.increment(self.sync_ts, PRIMARY_ID)
-                ts[PRIMARY_ID] = new_sync_ts[PRIMARY_ID]
+            id = PRIMARY_ID if forced else self.id
+            new_sync_ts = vc.increment(self.sync_ts, id)
+            ts[id] = new_sync_ts[id]
 
             u = Update(generate_id(5), *update, prev, ts, time())
 

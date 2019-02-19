@@ -1,6 +1,7 @@
 import Pyro4
 import time
 import random
+from threading import Lock
 from vector_clock import merge, create
 from utils import ignore_disconnects
 
@@ -11,7 +12,8 @@ PRIMARY_ID = "_"
 class PrimaryFinder:
     def __init__(self):
         self.ns = Pyro4.locateNS()
-        self.ts = {PRIMARY_ID: 0}
+        self.ts = 0
+        self.lock = Lock()
         self._primary = None
         self._find_primary_ts()
 
@@ -23,29 +25,35 @@ class PrimaryFinder:
             with ignore_disconnects():
                 replica = Pyro4.Proxy(uri)
                 if replica.status() == 'online':
-                    self.ts[PRIMARY_ID] = max(self.ts[PRIMARY_ID], replica.get_timestamp().get(PRIMARY_ID, 0))
+                    self.merge(replica.get_timestamp().get(PRIMARY_ID, 0))
                     if self._primary is None:
                         self._primary = replica
 
+    def get_ts(self):
+        with self.lock:
+            return {PRIMARY_ID: self.ts}
+
     def merge(self, ts):
-        self.ts = merge(ts, self.ts)
+        with self.lock:
+            self.ts = max(ts, self.ts)
 
     @property
     def primary(self):
-        with ignore_disconnects():
-            if self._primary and self._primary.status() != 'offline':
-                return self._primary
-        for _ in range(3):
-            with self.ns:
-                uris = list(self.ns.list(metadata_all={"replica"}).values())
-                uris.sort()
-            for uri in uris:
-                with ignore_disconnects():
-                    replica = Pyro4.Proxy(uri)
-                    if replica.status() != 'offline':
-                        self._primary = replica
-                        return replica
-            time.sleep(0.05)
+        with self.lock:
+            with ignore_disconnects():
+                if self._primary and self._primary.status() != 'offline':
+                    return self._primary
+            for _ in range(3):
+                with self.ns:
+                    uris = list(self.ns.list(metadata_all={"replica"}).values())
+                    uris.sort()
+                for uri in uris:
+                    with ignore_disconnects():
+                        replica = Pyro4.Proxy(uri)
+                        if replica.status() != 'offline':
+                            self._primary = replica
+                            return replica
+                time.sleep(0.05)
         raise RuntimeError("Cannot find primary!")
 
 
@@ -100,11 +108,11 @@ class Frontend:
     def add_rating_sync(self, user_id, movie_id, value):
         ts = self.pf.primary.update(
             (user_id, movie_id, value),
-            merge(self.ts, self.pf.ts),
+            merge(self.ts, self.pf.get_ts()),
             forced=True,
             )
         self.ts = merge(ts, self.ts)
-        self.pf.ts[PRIMARY_ID] = ts[PRIMARY_ID]
+        self.pf.merge(ts[PRIMARY_ID])
 
 
 if __name__ == '__main__':

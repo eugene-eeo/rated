@@ -10,4 +10,5 @@ for u in r:
         "id":   u[0],
         "prev": u[-3],
         "ts":   u[-2],
+        "time": u[-1],
         }, sort_keys=True))
