@@ -100,16 +100,21 @@ class Frontend:
         return data
 
     @Pyro4.expose
+    def get_aggregated_rating(self, movie_id):
+        data, ts = self.replica.get_aggregated(movie_id, self.ts)
+        self.ts = merge(ts, self.ts)
+        return data
+
+    @Pyro4.expose
     def add_rating(self, user_id, movie_id, value):
         ts = self.replica.update((user_id, movie_id, value), self.ts)
         self.ts = merge(ts, self.ts)
 
     @Pyro4.expose
-    def add_rating_sync(self, user_id, movie_id, value):
-        ts = self.pf.primary.update(
-            (user_id, movie_id, value),
+    def delete_rating(self, user_id, movie_id):
+        ts = self.pf.primary.delete(
+            (user_id, movie_id),
             merge(self.ts, self.pf.get_ts()),
-            forced=True,
             )
         self.ts = merge(ts, self.ts)
         self.pf.merge(ts[PRIMARY_ID])

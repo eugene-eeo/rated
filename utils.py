@@ -36,17 +36,17 @@ def apply_updates(ts, db, executed, log, buffer):
     while has_event:
         has_event = False
         next_buff = []
-        for u in buffer:
+        for e in buffer:
             # we've seen this value before, throw away!
-            if u.id in executed:
+            if e.id in executed:
                 continue
-            if vc.geq(ts, u.prev):
+            if vc.geq(ts, e.prev):
                 has_event = True
-                u.apply(db)
-                ts = vc.merge(ts, u.ts)
-                executed.add(u.id)
-                log.append(u)
+                e.op.apply(db)
+                ts = vc.merge(ts, e.ts)
+                executed.add(e.id)
+                log.append(e)
                 continue
-            next_buff.append(u)
+            next_buff.append(e)
         buffer = next_buff
     return ts, buffer

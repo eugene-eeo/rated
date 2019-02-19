@@ -25,52 +25,54 @@ class Session:
         self.user_id = user_id
 
     def help(self):
-        print("-" * 40)
         print("Help")
-        print(" [O] read Other user's ratings")
-        print(" [R] Read ratings")
-        print(" [U] Update ratings")
-        print(" [?] Help")
+        print(" [L] List ratings")
+        print(" [C] Create/update rating")
+        print(" [R] Read other's ratings")
+        print(" [G] Get aggregated rating")
+        print(" [D] Delete rating")
         print(" [Q] Quit")
-        print("-" * 40)
+        print(" [?] Help")
 
     def loop(self):
         self.help()
         while True:
             option = input("> ").strip().lower()
-            if option == "q":
-                break
-            print("-" * 40)
-            if option == "o":
-                self.read_other()
-            elif option == "r":
-                self.read_own()
-            elif option == "u":
-                self.update_own()
-            elif option == "?":
-                self.help()
-            print("-" * 40)
+            if   option == "l": self.list_ratings(self.user_id)
+            elif option == "c": self.create_rating()
+            elif option == "d": self.delete_rating()
+            elif option == "r": self.read_ratings()
+            elif option == "g": self.get_aggregated_rating()
+            elif option == "?": self.help()
+            elif option == "q": break
 
-    def read_other(self):
-        print("read Other user's ratings:")
-        user_id = get_integer("User ID (Integer): ")
-        print("Movie ID     Rating")
-        print("========     ======")
-        for movie_id, rating in self.frontend.get_ratings(user_id).items():
-            print("{0: >8}     {1: >6}".format(movie_id, rating))
+    def get_aggregated_rating(self):
+        movie_id = get_integer("Movie ID: ")
+        for key, val in self.frontend.get_aggregated_rating(movie_id).items():
+            print("{0}  {1:.2f}".format(key.capitalize(), val))
 
-    def read_own(self):
-        print("Read ratings:")
-        print("Movie ID     Rating")
-        print("========     ======")
-        for movie_id, rating in self.frontend.get_ratings(self.user_id).items():
-            print("{0: >8}     {1: >6}".format(movie_id, rating))
+    def delete_rating(self):
+        self.list_ratings(self.user_id)
+        movie_id = get_integer("Movie ID: ")
+        self.frontend.delete_rating(self.user_id, movie_id)
 
-    def update_own(self):
-        print("Update ratings:")
-        movie_id = get_integer("Movie ID (Integer): ")
-        rating   = get_rating("Rating (0-5): ")
+    def read_ratings(self):
+        user_id = get_integer("User ID: ")
+        self.list_ratings(user_id)
+
+    def create_rating(self):
+        self.list_ratings(self.user_id)
+        movie_id = get_integer("Movie ID: ")
+        rating = get_rating("Rating: ")
         self.frontend.add_rating(self.user_id, movie_id, rating)
+
+    def list_ratings(self, id):
+        ratings = self.frontend.get_ratings(id)
+        print("Movie ID    Rating")
+        print("========    ======")
+        for movie_id in sorted(ratings):
+            print("{0: >8}    {1: >6.2f}".format(movie_id, ratings[movie_id]))
+        return ratings
 
 
 def main():

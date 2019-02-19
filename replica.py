@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from random import random
 
 import Pyro4
-from models import Update
+from models import Update, Entry, Delete
 from threading import Lock, Thread
 from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer
 import vector_clock as vc
@@ -82,7 +82,7 @@ class Replica:
                             chain(self.log, self.buffer)
                             )
                         # get all events which are concurrent or greater than
-                        events = [u for u in log if vc.compare(u.ts, t) >= 0]
+                        events = [e.to_raw() for e in log if vc.compare(e.ts, t) >= 0]
                         logs.append((peer, self.sync_ts, events))
             # now send events
             for peer, ts, log in logs:
@@ -112,7 +112,7 @@ class Replica:
                 peer = Pyro4.Proxy(uri)
                 with ignore_disconnects(), peer:
                     if peer.status() != 'offline':
-                        peer.sync_forced(u)
+                        peer.sync_forced(u.to_raw())
                         told.add(uri)
             if len(told) == len(uris):
                 break
@@ -126,13 +126,26 @@ class Replica:
             with Pyro4.Proxy(uri) as peer:
                 peer.commit_forced(u.id)
 
+    @contextmanager
+    def spin(self, ts, guarantee=20):
+        while True:
+            with self.lock:
+                # can respond
+                if vc.geq(self.ts, ts):
+                    yield
+                    return
+                if guarantee == 0:
+                    raise RuntimeError("Cannot retrieve value!")
+            sleep(self.sync_period)
+            guarantee -= 1
+
     # exposed methods
 
     @Pyro4.expose
-    def sync_forced(self, u):
+    def sync_forced(self, e):
         with self.lock:
-            u = Update(*u)
-            self.forced[u.id] = u
+            e = Entry.from_raw(e)
+            self.forced[e.id] = e
 
     @Pyro4.expose
     def commit_forced(self, id):
@@ -159,7 +172,7 @@ class Replica:
     def sync(self, log, ts):
         with self.lock:
             self.sync_ts = vc.merge(self.sync_ts, ts)
-            self.buffer.extend(Update(*u) for u in log)
+            self.buffer.extend(Entry.from_raw(u) for u in log)
             self.has_new_gossip = True
 
     @Pyro4.expose
@@ -171,33 +184,51 @@ class Replica:
         return self.sync_ts
 
     @Pyro4.expose
-    def get(self, user_id, ts, guarantee=20):
-        while True:
-            with self.lock:
-                # can respond
-                if vc.geq(self.ts, ts):
-                    return self.db.get(user_id, {}), self.ts
-                if guarantee == 0:
-                    raise RuntimeError("Cannot retrieve value!")
-            sleep(self.sync_period)
-            guarantee -= 1
+    def get_aggregated(self, movie_id, ts):
+        with self.spin(ts):
+            ratings = [r[movie_id] for r in self.db.values() if movie_id in r]
+            avg = lambda r: (sum(r) / len(r))
+            stats = {
+                "avg": avg(ratings) if ratings else None,
+                "min": min(ratings) if ratings else None,
+                "max": max(ratings) if ratings else None,
+            }
+            return stats, self.ts
 
     @Pyro4.expose
-    def update(self, update, ts, forced=False):
+    def get(self, user_id, ts):
+        with self.spin(ts):
+            return self.db.get(user_id, {}), self.ts
+
+    @Pyro4.expose
+    def delete(self, pair, ts):
+        # meant to be used with PRIMARY_ID
         with self.lock:
             prev = ts.copy()
-            id = PRIMARY_ID if forced else self.id
-            new_sync_ts = vc.increment(self.sync_ts, id)
-            ts[id] = new_sync_ts[id]
+            new_sync_ts = vc.increment(self.sync_ts, PRIMARY_ID)
+            ts[PRIMARY_ID] = new_sync_ts[PRIMARY_ID]
 
-            u = Update(generate_id(5), *update, prev, ts, time())
-
-            if forced:
-                self.forced_update(u)
+            e = Entry(generate_id(5), Delete(*pair), prev, ts, time())
+            self.forced_update(e)
             # commit changes and apply update immediately if possible
             self.sync_ts = new_sync_ts
             self.need_reconstruct = True
-            self.buffer.append(u)
+            self.buffer.append(e)
+            self.apply_updates()
+            return ts
+
+    @Pyro4.expose
+    def update(self, update, ts):
+        with self.lock:
+            prev = ts.copy()
+            new_sync_ts = vc.increment(self.sync_ts, self.id)
+            ts[self.id] = new_sync_ts[self.id]
+
+            e = Entry(generate_id(5), Update(*update), prev, ts, time())
+            # commit changes and apply update immediately if possible
+            self.sync_ts = new_sync_ts
+            self.need_reconstruct = True
+            self.buffer.append(e)
             self.apply_updates()
             return ts
 
