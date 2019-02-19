@@ -64,7 +64,7 @@ class Replica:
                     self.apply_updates()
                     n = 0
                 # relax 5 rounds and apply a global order to the updates
-                elif n >= 5 and self.need_reconstruct:
+                elif n >= 5 and self.need_reconstruct and not self.buffer:
                     self.need_reconstruct = False
                     self.reconstruct()
                     n = 0
@@ -94,9 +94,7 @@ class Replica:
         self.ts = {}
         self.db.clear()
         self.executed.clear()
-        self.log.extend(self.buffer)
-        self.buffer = self.log
-        self.log = []
+        self.log, self.buffer = [], self.log
         self.apply_updates()
 
     def apply_updates(self):
@@ -140,9 +138,14 @@ class Replica:
     def commit_forced(self, id):
         with self.lock:
             self.buffer.append(self.forced[id])
-            self.apply_updates()
             self.sync_ts[PRIMARY_ID] = self.forced[id].ts[PRIMARY_ID]
+            self.apply_updates()
             del self.forced[id]
+            # delete stale logs
+            for uid in list(self.forced):
+                if self.forced[uid].ts[PRIMARY_ID] < self.ts[PRIMARY_ID]:
+                    del self.forced[uid]
+            self.need_reconstruct = True
 
     @Pyro4.expose
     def status(self):
