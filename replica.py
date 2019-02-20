@@ -31,7 +31,7 @@ class Replica:
         self.has_new_gossip = False
         self.need_reconstruct = False
         self.is_online = True
-        self.forced = {}
+        self.forced = None
 
     @property
     @contextmanager
@@ -145,20 +145,19 @@ class Replica:
     def sync_forced(self, e):
         with self.lock:
             e = Entry.from_raw(e)
-            self.forced[e.id] = e
+            if self.forced is not None and self.forced.ts[PRIMARY_ID] > e.ts[PRIMARY_ID]:
+                raise RuntimeError("more than one forced update running")
+            self.forced = e
 
     @Pyro4.expose
     def commit_forced(self, id):
         with self.lock:
-            self.buffer.append(self.forced[id])
-            self.sync_ts[PRIMARY_ID] = self.forced[id].ts[PRIMARY_ID]
-            self.apply_updates()
-            del self.forced[id]
-            # delete stale logs
-            for uid in list(self.forced):
-                if self.forced[uid].ts[PRIMARY_ID] < self.ts[PRIMARY_ID]:
-                    del self.forced[uid]
-            self.need_reconstruct = True
+            if id == self.forced.id:
+                self.buffer.append(self.forced)
+                self.sync_ts[PRIMARY_ID] = self.forced.ts[PRIMARY_ID]
+                self.apply_updates()
+                self.forced = None
+                self.need_reconstruct = True
 
     @Pyro4.expose
     def status(self):
