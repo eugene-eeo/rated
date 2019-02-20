@@ -31,6 +31,7 @@ class Replica:
         self.has_new_gossip = False
         self.need_reconstruct = False
         self.is_online = True
+        # forced txn
         self.forced = None
 
     @property
@@ -111,8 +112,7 @@ class Replica:
             for uri in set(uris) - told:
                 peer = Pyro4.Proxy(uri)
                 with ignore_disconnects(), peer:
-                    if peer.status() != 'offline':
-                        peer.sync_forced(u.to_raw())
+                    if peer.status() == 'online' and peer.sync_forced(u.to_raw()):
                         told.add(uri)
             if len(told) == len(uris):
                 break
@@ -145,9 +145,14 @@ class Replica:
     def sync_forced(self, e):
         with self.lock:
             e = Entry.from_raw(e)
-            if self.forced is not None and self.forced.ts[PRIMARY_ID] > e.ts[PRIMARY_ID]:
-                raise RuntimeError("more than one forced update running")
+            if self.forced is not None \
+                    and self.forced.id != e.id \
+                    and (self.forced.ts[PRIMARY_ID] > e.ts[PRIMARY_ID] or (
+                         self.forced.ts[PRIMARY_ID] == e.ts[PRIMARY_ID]
+                         and e.time - self.forced.time < 5)):
+                return False
             self.forced = e
+            return True
 
     @Pyro4.expose
     def commit_forced(self, id):
@@ -156,8 +161,8 @@ class Replica:
                 self.buffer.append(self.forced)
                 self.sync_ts[PRIMARY_ID] = self.forced.ts[PRIMARY_ID]
                 self.apply_updates()
-                self.forced = None
                 self.need_reconstruct = True
+                self.forced = None
 
     @Pyro4.expose
     def status(self):
