@@ -8,7 +8,7 @@ from random import random
 import Pyro4
 from models import Update, Entry, Delete
 from threading import Lock, Thread
-from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer
+from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, unregister_at_exit
 import vector_clock as vc
 
 
@@ -184,12 +184,6 @@ if __name__ == '__main__':
         with Pyro4.locateNS() as ns:
             ns.register("replica:%s" % r.id, uri, metadata={"replica"})
 
-        def unregister():
-            Pyro4.locateNS().remove("replica:%s" % r.id)
-            os._exit(0)
-
-        signal.signal(signal.SIGTERM, lambda *_: (unregister()))
-        signal.signal(signal.SIGINT,  lambda *_: (unregister()))
-
+        unregister_at_exit("replica:%s" % r.id)
         Thread(target=r.gossip).start()
         daemon.requestLoop()

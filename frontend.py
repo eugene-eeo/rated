@@ -3,7 +3,7 @@ import time
 import random
 from threading import Lock
 from vector_clock import merge, create
-from utils import ignore_disconnects
+from utils import ignore_disconnects, unregister_at_exit
 
 
 @Pyro4.behavior(instance_mode="session")
@@ -69,7 +69,8 @@ class Frontend:
 
 if __name__ == '__main__':
     with Pyro4.Daemon() as daemon:
-        uri = daemon.register(Frontend)
+        uri = daemon.register(Frontend, "frontend")
         with Pyro4.locateNS() as ns:
             ns.register("frontend", uri)
+        unregister_at_exit("frontend")
         daemon.requestLoop()

@@ -1,11 +1,22 @@
 from base64 import b64encode
 from contextlib import contextmanager
-from copy import deepcopy
 from random import shuffle
 from operator import attrgetter
 from uuid import uuid4
+import os
+import signal
+
+import Pyro4
 from Pyro4.errors import ConnectionClosedError, CommunicationError, TimeoutError
 import vector_clock as vc
+
+
+def unregister_at_exit(name):
+    def u():
+        Pyro4.locateNS().remove(name)
+        os._exit(0)
+    signal.signal(signal.SIGTERM, lambda *_: u())
+    signal.signal(signal.SIGINT,  lambda *_: u())
 
 
 def generate_id(l=10):
