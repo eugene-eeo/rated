@@ -10,9 +10,6 @@ from utils import generate_id, find_random_peers, ignore_disconnects, apply_upda
 import vector_clock as vc
 
 
-PRIMARY_ID = "_"
-
-
 class Replica:
     def __init__(self):
         self.id = generate_id(5)
@@ -31,8 +28,6 @@ class Replica:
         self.has_new_gossip = False
         self.need_reconstruct = False
         self.is_online = True
-        # forced txn
-        self.forced = None
 
     @property
     @contextmanager
@@ -103,29 +98,6 @@ class Replica:
         self.ts, self.buffer = apply_updates(self.ts, self.db, self.executed,
                                              self.log, self.buffer)
 
-    def forced_update(self, u, patience=5):
-        # find all the peers
-        with self.ns:
-            uris = find_random_peers(self.ns, self.id, "replica")
-        told = set()
-        while True:
-            for uri in set(uris) - told:
-                peer = Pyro4.Proxy(uri)
-                with ignore_disconnects(), peer:
-                    if peer.status() == 'online' and peer.sync_forced(u.to_raw()):
-                        told.add(uri)
-            if len(told) == len(uris):
-                break
-            patience -= 1
-            if patience == 0:
-                raise RuntimeError("cannot apply forced update!")
-            # give time to recover
-            sleep(self.sync_period / 2)
-        # ack
-        for uri in told:
-            with Pyro4.Proxy(uri) as peer:
-                peer.commit_forced(u.id)
-
     @contextmanager
     def spin(self, ts, guarantee=20):
         while True:
@@ -140,29 +112,6 @@ class Replica:
             guarantee -= 1
 
     # exposed methods
-
-    @Pyro4.expose
-    def sync_forced(self, e):
-        with self.lock:
-            e = Entry.from_raw(e)
-            if self.forced is not None \
-                    and self.forced.id != e.id \
-                    and (self.forced.ts[PRIMARY_ID] > e.ts[PRIMARY_ID] or (
-                         self.forced.ts[PRIMARY_ID] == e.ts[PRIMARY_ID]
-                         and e.time - self.forced.time < 5)):
-                return False
-            self.forced = e
-            return True
-
-    @Pyro4.expose
-    def commit_forced(self, id):
-        with self.lock:
-            if id == self.forced.id:
-                self.buffer.append(self.forced)
-                self.sync_ts[PRIMARY_ID] = self.forced.ts[PRIMARY_ID]
-                self.apply_updates()
-                self.need_reconstruct = True
-                self.forced = None
 
     @Pyro4.expose
     def status(self):
@@ -206,14 +155,12 @@ class Replica:
 
     @Pyro4.expose
     def delete(self, pair, ts):
-        # meant to be used with PRIMARY_ID
         with self.lock:
             prev = ts.copy()
-            new_sync_ts = vc.increment(self.sync_ts, PRIMARY_ID)
-            ts[PRIMARY_ID] = new_sync_ts[PRIMARY_ID]
+            new_sync_ts = vc.increment(self.sync_ts, self.id)
+            ts[self.id] = new_sync_ts[self.id]
 
             e = Entry(generate_id(5), Delete(*pair), prev, ts, time())
-            self.forced_update(e)
             # commit changes and apply update immediately if possible
             self.sync_ts = new_sync_ts
             self.need_reconstruct = True

@@ -6,63 +6,10 @@ from vector_clock import merge, create
 from utils import ignore_disconnects
 
 
-PRIMARY_ID = "_"
-
-
-class PrimaryFinder:
-    def __init__(self):
-        self.ns = Pyro4.locateNS()
-        self.ts = 0
-        self.lock = Lock()
-        self._primary = None
-        self._find_primary_ts()
-
-    def _find_primary_ts(self):
-        with self.ns:
-            uris = list(self.ns.list(metadata_all={"replica"}).values())
-            uris.sort()
-        for uri in uris:
-            with ignore_disconnects():
-                replica = Pyro4.Proxy(uri)
-                if replica.status() == 'online':
-                    self.merge(replica.get_timestamp().get(PRIMARY_ID, 0))
-                    if self._primary is None:
-                        self._primary = replica
-
-    def get_ts(self):
-        with self.lock:
-            return {PRIMARY_ID: self.ts}
-
-    def merge(self, ts):
-        with self.lock:
-            self.ts = max(ts, self.ts)
-
-    @property
-    def primary(self):
-        with self.lock:
-            with ignore_disconnects():
-                if self._primary and self._primary.status() != 'offline':
-                    return self._primary
-            for _ in range(3):
-                with self.ns:
-                    uris = list(self.ns.list(metadata_all={"replica"}).values())
-                    uris.sort()
-                for uri in uris:
-                    with ignore_disconnects():
-                        replica = Pyro4.Proxy(uri)
-                        if replica.status() != 'offline':
-                            self._primary = replica
-                            return replica
-                time.sleep(0.05)
-        raise RuntimeError("Cannot find primary!")
-
-
 @Pyro4.behavior(instance_mode="session")
 class Frontend:
-    pf = PrimaryFinder()
-
     def __init__(self):
-        self.ns = self.pf.ns
+        self.ns = Pyro4.locateNS()
         self.ts = create()
         self._replica = None
 
@@ -112,12 +59,8 @@ class Frontend:
 
     @Pyro4.expose
     def delete_rating(self, user_id, movie_id):
-        ts = self.pf.primary.delete(
-            (user_id, movie_id),
-            merge(self.ts, self.pf.get_ts()),
-            )
+        ts = self.replica.delete((user_id, movie_id), self.ts)
         self.ts = merge(ts, self.ts)
-        self.pf.merge(ts[PRIMARY_ID])
 
 
 if __name__ == '__main__':

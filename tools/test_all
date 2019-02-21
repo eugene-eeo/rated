@@ -22,12 +22,10 @@ wait
 # check for causal consistency
 sleep 8
 ./tools/get_logs
-./tools/check_forced_updates
 ./tools/check_causal_consistency
 
 # wait for replica sync and reconstruction
 sleep 30
 ./tools/get_logs
-./tools/check_forced_updates
 ./tools/check_causal_consistency
 ./tools/check_global_consistency
