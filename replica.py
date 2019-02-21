@@ -1,3 +1,5 @@
+import os
+import signal
 from time import sleep, time
 from itertools import chain, islice
 from contextlib import contextmanager
@@ -99,7 +101,7 @@ class Replica:
                                              self.log, self.buffer)
 
     @contextmanager
-    def spin(self, ts, guarantee=20):
+    def spin(self, ts, guarantee=10):
         while True:
             with self.lock:
                 # can respond
@@ -110,6 +112,17 @@ class Replica:
                     raise RuntimeError("Cannot retrieve value!")
             sleep(self.sync_period)
             guarantee -= 1
+
+    def add_update(self, op, prev):
+        ts = prev.copy()
+        new_sync_ts = vc.increment(self.sync_ts, self.id)
+        ts[self.id] = new_sync_ts[self.id]
+        # commit update immediately if possible
+        self.buffer.append(Entry(generate_id(5), op, prev, ts, time()))
+        self.apply_updates()
+        self.need_reconstruct = True
+        self.sync_ts = new_sync_ts
+        return ts
 
     # exposed methods
 
@@ -156,39 +169,27 @@ class Replica:
     @Pyro4.expose
     def delete(self, pair, ts):
         with self.lock:
-            prev = ts.copy()
-            new_sync_ts = vc.increment(self.sync_ts, self.id)
-            ts[self.id] = new_sync_ts[self.id]
-
-            e = Entry(generate_id(5), Delete(*pair), prev, ts, time())
-            # commit changes and apply update immediately if possible
-            self.sync_ts = new_sync_ts
-            self.need_reconstruct = True
-            self.buffer.append(e)
-            self.apply_updates()
-            return ts
+            return self.add_update(Delete(*pair), ts)
 
     @Pyro4.expose
     def update(self, update, ts):
         with self.lock:
-            prev = ts.copy()
-            new_sync_ts = vc.increment(self.sync_ts, self.id)
-            ts[self.id] = new_sync_ts[self.id]
-
-            e = Entry(generate_id(5), Update(*update), prev, ts, time())
-            # commit changes and apply update immediately if possible
-            self.sync_ts = new_sync_ts
-            self.need_reconstruct = True
-            self.buffer.append(e)
-            self.apply_updates()
-            return ts
+            return self.add_update(Update(*update), ts)
 
 
 if __name__ == '__main__':
     r = Replica()
     with Pyro4.Daemon() as daemon:
-        uri = daemon.register(r)
+        uri = daemon.register(r, objectId=r.id)
         with Pyro4.locateNS() as ns:
             ns.register("replica:%s" % r.id, uri, metadata={"replica"})
+
+        def unregister():
+            Pyro4.locateNS().remove("replica:%s" % r.id)
+            os._exit(0)
+
+        signal.signal(signal.SIGTERM, lambda *_: (unregister()))
+        signal.signal(signal.SIGINT,  lambda *_: (unregister()))
+
         Thread(target=r.gossip).start()
         daemon.requestLoop()

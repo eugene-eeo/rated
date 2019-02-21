@@ -37,6 +37,10 @@ class Frontend:
         raise RuntimeError("No replica available")
 
     @Pyro4.expose
+    def forget(self):
+        self.ts = {}
+
+    @Pyro4.expose
     def get_timestamp(self):
         return self.ts
 

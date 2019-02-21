@@ -86,7 +86,14 @@ class Session:
         self.frontend.add_rating(self.user_id, movie_id, rating)
 
     def list_ratings(self, id):
-        ratings = self.frontend.get_ratings(id)
+        try:
+            ratings = self.frontend.get_ratings(id)
+        except RuntimeError as exc:
+            if exc.args[0] == "Cannot retrieve value!":
+                self.frontend.forget()
+                print("Warning: Something went wrong, stale data might be read.")
+                return self.list_ratings(id)
+            raise
         print("Movie ID    Rating")
         print("========    ======")
         for movie_id in sorted(ratings):

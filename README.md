@@ -17,10 +17,3 @@ $ for i in $(seq 10); do
 ```bash
 $ tools/test_all
 ```
-
-## todo
-
- - [x] lazy for creating ratings
- - [x] primary decided by frontend (least-id-wins)
- - [x] primary for forced updates
- - [ ] log compaction
