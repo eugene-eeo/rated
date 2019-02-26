@@ -8,8 +8,7 @@ def get_rating(prompt):
             x = float(x)
             if 0 <= x <= 5:
                 return x
-            else:
-                print("Please enter a number between 0 and 5")
+            print("Please enter a number between 0 and 5")
         except ValueError:
             pass
 
