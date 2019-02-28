@@ -65,7 +65,7 @@ class Session:
 
     def help(self):
         print()
-        print(" [SM] Search")
+        print(" [S] Search")
         print(" [CM] Create Movie")
         print(" [GM] Get Movie")
         print()
@@ -89,7 +89,7 @@ class Session:
                 break
             try:
                 if   option == "v": self.get_user_data()
-                elif option == "sm": self.search_movie()
+                elif option == "s": self.search_movie()
                 elif option == "cm": self.create_movie()
                 elif option == "gm": self.get_movie()
                 elif option == "ar": self.add_rating()
@@ -209,7 +209,7 @@ class Session:
             self.own_data = self.frontend.get_user_data(self.user_id)
         except RuntimeError as exc:
             if exc.args[0] == "Cannot retrieve value!":
-                print("Warning: data might be out of date.")
+                print("  [!] Warning: data might be out of date.")
                 self.frontend.forget()
             else:
                 raise

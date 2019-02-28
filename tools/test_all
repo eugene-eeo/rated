@@ -20,12 +20,12 @@ done
 wait
 
 # check for causal consistency
-sleep 8
+sleep 6
 ./tools/get_logs
 ./tools/check_causal_consistency
 
 # wait for replica sync and reconstruction
-sleep 30
+sleep 18
 ./tools/get_logs
 ./tools/check_causal_consistency
 ./tools/check_global_consistency
