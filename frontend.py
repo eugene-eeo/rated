@@ -82,8 +82,12 @@ class Frontend:
         return data
 
     @Pyro4.expose
-    def list_movies(self):
-        data, ts = self.replica.list_movies(self.ts)
+    def list_movies(self, maximal=False):
+        dep = self.ts
+        if maximal:
+            with self.lock:
+                dep = Frontend.max_ts
+        data, ts = self.replica.list_movies(dep)
         self.update_ts(ts)
         return data
 

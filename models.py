@@ -77,12 +77,14 @@ class UpdateMovie(namedtuple('UpdateMovie', 'movie_id,data')):
 
 
 @register("A")
-class AddTag(namedtuple('AddTag', 'user_id,movie_id,tag')):
+class AddTag(namedtuple('AddTag', 'user_id,movie_id,tags')):
     def apply(self, db):
-        db.add_tag(self.user_id, self.movie_id, self.tag)
+        for tag in self.tags:
+            db.add_tag(self.user_id, self.movie_id, tag)
 
 
 @register("R")
-class RemoveTag(namedtuple('RemoveTag', 'user_id,movie_id,tag')):
+class RemoveTag(namedtuple('RemoveTag', 'user_id,movie_id,tags')):
     def apply(self, db):
-        db.remove_tag(self.user_id, self.movie_id, self.tag)
+        for tag in self.tags:
+            db.remove_tag(self.user_id, self.movie_id, tag)
