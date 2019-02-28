@@ -1,3 +1,4 @@
+import sys
 import os
 import signal
 from time import sleep, time
@@ -6,7 +7,7 @@ from contextlib import contextmanager
 from random import random
 
 import Pyro4
-from models import Update, Entry, Delete
+from models import *
 from threading import Lock, Thread
 from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, unregister_at_exit
 import vector_clock as vc
@@ -17,7 +18,7 @@ class Replica:
         self.id = generate_id(5)
         self.ns = Pyro4.locateNS()
         # state and updates
-        self.db = {}
+        self.db = DB()
         self.log = []
         self.ts = vc.create() # timestamp of state
         self.executed = set()
@@ -150,35 +151,55 @@ class Replica:
         return self.sync_ts
 
     @Pyro4.expose
-    def get_aggregated(self, movie_id, ts):
+    def list_movies(self, ts):
         with self.spin(ts):
-            ratings = [r[movie_id] for r in self.db.values() if movie_id in r]
+            data = {id: movie["name"] for id, movie in self.db.movies.items()}
+            return data, self.ts
+
+    @Pyro4.expose
+    def get_movie(self, movie_id, ts):
+        with self.spin(ts):
+            if movie_id not in self.db.movies:
+                return None, self.ts
+            data = {}
+            data.update(self.db.movies[movie_id])
+
+            # compile tags
+            data["tags"] = set()
+            for tags in self.db.tags.values():
+                data["tags"].update(tags[movie_id])
+
+            # compile ratings
+            ratings = [r[movie_id] for r in self.db.ratings.values() if movie_id in r]
             avg = lambda r: (sum(r) / len(r))
-            stats = {
+            data["ratings"] = {
                 "avg": avg(ratings) if ratings else None,
                 "min": min(ratings) if ratings else None,
                 "max": max(ratings) if ratings else None,
             }
-            return stats, self.ts
+            return data, self.ts
 
     @Pyro4.expose
     def get(self, user_id, ts):
         with self.spin(ts):
-            return self.db.get(user_id, {}), self.ts
+            data = {
+                "ratings": self.db.ratings[user_id],
+                "tags":    self.db.tags[user_id],
+            }
+            return data, self.ts
 
     @Pyro4.expose
-    def delete(self, pair, ts):
+    def update(self, raw, ts):
         with self.lock:
-            return self.add_update(Delete(*pair), ts)
-
-    @Pyro4.expose
-    def update(self, update, ts):
-        with self.lock:
-            return self.add_update(Update(*update), ts)
+            return self.add_update(update_from_raw(raw), ts)
 
 
 if __name__ == '__main__':
     r = Replica()
+    # overwrite id if necessary
+    if len(sys.argv) == 2 and sys.argv[1]:
+        r.id = sys.argv[1]
+
     with Pyro4.Daemon() as daemon:
         uri = daemon.register(r, objectId=r.id)
         with Pyro4.locateNS() as ns:
