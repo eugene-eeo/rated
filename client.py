@@ -1,5 +1,6 @@
-import Pyro4
 import textwrap
+import Pyro4
+from Pyro4.errors import ConnectionClosedError, CommunicationError, TimeoutError
 
 
 def get_confirm(prompt):
@@ -13,16 +14,16 @@ def get_confirm(prompt):
 
 
 def get_movie_id(prompt, movies):
-    order = {i: [id, name] for i, (id,name) in enumerate(movies.items())}
+    order = [[id, name] for (id,name) in movies.items()]
     print("Movies:")
     print("=======")
-    for key, (_, name) in order.items():
-        print(" [%d] %s" % (key, name))
+    for i, (_, name) in enumerate(order):
+        print(" [%d] %s" % (i, name))
     while True:
         x = input(prompt).strip()
         try:
             x = int(x)
-            if x in order:
+            if 0 <= x < len(order):
                 return order[x][0]
             print("Invalid selection")
         except ValueError:
@@ -100,6 +101,18 @@ class Session:
             except RuntimeError as exc:
                 print(" [!] Error: Cannot perform operation:", exc.args[0])
                 print(" Please try again later.")
+            except (ConnectionError, ConnectionClosedError, CommunicationError, TimeoutError):
+                print(" [!] Error: Cannot connect to frontend.")
+                print(" [!] Retrying...")
+                try:
+                    self.frontend = Pyro4.locateNS().lookup("frontend")
+                    self.frontend.get_timestamp()
+                    print(" OK.")
+                    print(" Warning: Data might be stale.")
+                except:
+                    print(" [!] Error: Cannot reconnect.")
+                    print(" [!] Bye.")
+                    exit(1)
 
     def select_movie(self):
         self.movies = self.frontend.list_movies()
@@ -177,6 +190,8 @@ class Session:
     def get_movie(self):
         movie_id = self.select_movie()
         movie = self.frontend.get_movie(movie_id)
+        if not movie:
+            return
         print()
         print(movie["name"])
         print("-" * len(movie["name"]))
@@ -219,7 +234,12 @@ class Session:
 
 def main():
     user_id = get_integer("User ID (Integer): ")
-    frontend = Pyro4.Proxy(Pyro4.locateNS().lookup("frontend"))
+    try:
+        frontend = Pyro4.Proxy(Pyro4.locateNS().lookup("frontend"))
+    except:
+        print(" [!] Error: Cannot connect to frontend.")
+        print(" [!] Bye.")
+        exit(1)
     Session(frontend, user_id).loop()
 
 
