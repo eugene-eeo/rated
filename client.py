@@ -64,13 +64,14 @@ class Session:
 
     def help(self):
         print()
+        print(" [SM] Search")
         print(" [CM] Create Movie")
         print(" [GM] Get Movie")
         print()
         print(" [V]  View my ratings")
         print(" [AR] Add/update Rating")
-        print(" [AT] Add Tag")
         print(" [RR] Remove Rating")
+        print(" [AT] Add Tag")
         print(" [RT] Remove Tag")
         print()
         print(" [Q]  Quit")
@@ -87,12 +88,13 @@ class Session:
                 break
             try:
                 if   option == "v": self.get_user_data()
+                elif option == "sm": self.search_movie()
                 elif option == "cm": self.create_movie()
                 elif option == "gm": self.get_movie()
-                elif option == "at": self.add_tag()
-                elif option == "rt": self.remove_tag()
                 elif option == "ar": self.add_rating()
                 elif option == "rr": self.remove_rating()
+                elif option == "at": self.add_tag()
+                elif option == "rt": self.remove_tag()
                 elif option == "?": self.help()
                 elif option == "q": break
             except RuntimeError as exc:
@@ -102,6 +104,23 @@ class Session:
     def select_movie(self):
         self.movies = self.frontend.list_movies()
         return get_movie_id("Movie Selection: ", self.movies)
+
+    def search_movie(self):
+        name   = input("Name: ").strip()
+        genres = set()
+        while True:
+            genre = get_tag("Genre: [Type / to stop] ")
+            if genre == '/':
+                break
+            genres.add(genre)
+        movies = self.frontend.search(name, genres)
+        print("Movie                    Genres")
+        print("=====                    ======")
+        for movie in movies:
+            print("{0: <21}    {1}".format(
+                textwrap.shorten(movie["name"], 21, placeholder='...'),
+                ', '.join(movie["genres"]),
+                ))
 
     def add_tag(self):
         movie_id = self.select_movie()
@@ -192,11 +211,10 @@ class Session:
             if movie_id in data["ratings"]:
                 rating = format(data["ratings"][movie_id], ">6.2f")
             print("{0: <17}    {1}    {2}".format(
-                textwrap.shorten(self.movies[movie_id], 17),
+                textwrap.shorten(self.movies[movie_id], 17, placeholder='...'),
                 rating,
                 ', '.join(data["tags"].get(movie_id, [])),
                 ))
-        return
 
 
 def main():

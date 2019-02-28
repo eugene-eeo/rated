@@ -157,6 +157,16 @@ class Replica:
             return data, self.ts
 
     @Pyro4.expose
+    def search(self, name, genres, ts):
+        with self.spin(ts):
+            results = []
+            genres = set(genres)
+            for movie in self.db.movies.values():
+                if name in movie['name'] and genres.issubset(movie['genres']):
+                    results.append(movie)
+            return results, self.ts
+
+    @Pyro4.expose
     def get_movie(self, movie_id, ts):
         with self.spin(ts):
             if movie_id not in self.db.movies:

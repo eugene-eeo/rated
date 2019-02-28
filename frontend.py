@@ -92,6 +92,12 @@ class Frontend:
         return data
 
     @Pyro4.expose
+    def search(self, name, genres):
+        data, ts = self.replica.search(name, genres, self.ts)
+        self.update_ts(ts)
+        return data
+
+    @Pyro4.expose
     def get_movie(self, movie_id):
         data, ts = self.replica.get_movie(movie_id, self.ts)
         self.update_ts(ts)
