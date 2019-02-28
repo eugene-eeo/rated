@@ -3,6 +3,11 @@ import Pyro4
 from Pyro4.errors import ConnectionClosedError, CommunicationError, TimeoutError
 
 
+def similar(a, b):
+    # jaccard index
+    return len(a & b) / len(a | b)
+
+
 def get_confirm(prompt):
     while True:
         c = input(prompt).strip().lower()
@@ -173,7 +178,7 @@ class Session:
         self.movies = self.frontend.list_movies(maximal=True)
         words = set(name.lower().split())
         for _, other_name in self.movies.items():
-            if words == set(other_name.lower().split()):
+            if similar(words, set(other_name.lower().split())) > 0.5:
                 print("Similar movie found:", name)
                 if get_confirm("Is this the same? [y/n]"):
                     return
