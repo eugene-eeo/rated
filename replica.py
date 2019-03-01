@@ -14,11 +14,11 @@ import vector_clock as vc
 
 
 class Replica:
-    def __init__(self):
-        self.id = generate_id(5)
+    def __init__(self, id):
+        self.id = id
         self.ns = Pyro4.locateNS()
         # state and updates
-        self.db = DB()
+        self.db = DB.from_data()
         self.log = []
         self.ts = vc.create() # timestamp of state
         self.executed = set()
@@ -91,7 +91,7 @@ class Replica:
 
     def reconstruct(self):
         self.ts = {}
-        self.db.clear()
+        self.db = DB.from_data()
         self.executed.clear()
         self.log, self.buffer = [], self.log
         self.apply_updates()
@@ -119,7 +119,7 @@ class Replica:
         new_sync_ts = vc.increment(self.sync_ts, self.id)
         ts[self.id] = new_sync_ts[self.id]
         # commit update immediately if possible
-        self.buffer.append(Entry(generate_id(5), op, prev, ts, time()))
+        self.buffer.append(Entry(generate_id(10), op, prev, ts, time()))
         self.apply_updates()
         self.need_reconstruct = True
         self.sync_ts = new_sync_ts
@@ -159,11 +159,11 @@ class Replica:
     @Pyro4.expose
     def search(self, name, genres, ts):
         with self.spin(ts):
-            results = []
+            results = {}
             genres = set(genres)
-            for movie in self.db.movies.values():
+            for id, movie in self.db.movies.items():
                 if name in movie['name'] and genres.issubset(movie['genres']):
-                    results.append(movie)
+                    results[id] = movie
             return results, self.ts
 
     @Pyro4.expose
@@ -186,6 +186,7 @@ class Replica:
                 "avg": avg(ratings) if ratings else None,
                 "min": min(ratings) if ratings else None,
                 "max": max(ratings) if ratings else None,
+                "len": len(ratings),
             }
             return data, self.ts
 
@@ -205,10 +206,11 @@ class Replica:
 
 
 if __name__ == '__main__':
-    r = Replica()
-    # overwrite id if necessary
+    # generate id if necessary
+    id = generate_id(5)
     if len(sys.argv) == 2 and sys.argv[1]:
-        r.id = sys.argv[1]
+        id = sys.argv[1]
+    r = Replica(id)
 
     with Pyro4.Daemon() as daemon:
         uri = daemon.register(r, objectId=r.id)

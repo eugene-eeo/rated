@@ -18,23 +18,6 @@ def get_confirm(prompt):
                 return False
 
 
-def get_movie_id(prompt, movies):
-    order = [[id, name] for (id,name) in movies.items()]
-    print("Movies:")
-    print("=======")
-    for i, (_, name) in enumerate(order):
-        print(" [%d] %s" % (i, name))
-    while True:
-        x = input(prompt).strip()
-        try:
-            x = int(x)
-            if 0 <= x < len(order):
-                return order[x][0]
-            print("Invalid selection")
-        except ValueError:
-            pass
-
-
 def get_tag(prompt):
     while True:
         x = input(prompt).strip()
@@ -119,10 +102,6 @@ class Session:
                     print(" [!] Bye.")
                     exit(1)
 
-    def select_movie(self):
-        self.movies = self.frontend.list_movies()
-        return get_movie_id("Movie Selection: ", self.movies)
-
     def search_movie(self):
         name   = input("Name: ").strip()
         genres = set()
@@ -132,16 +111,17 @@ class Session:
                 break
             genres.add(genre)
         movies = self.frontend.search(name, genres)
-        print("Movie                    Genres")
-        print("=====                    ======")
-        for movie in movies:
-            print("{0: <21}    {1}".format(
-                textwrap.shorten(movie["name"], 21, placeholder='...'),
+        print("ID      Movie                            Genres")
+        print("==      =====                            ======")
+        for movie_id, movie in movies.items():
+            print("{0: <6}  {1: <29}    {2}".format(
+                movie_id,
+                textwrap.shorten(movie["name"], 29, placeholder='...'),
                 ', '.join(movie["genres"]),
                 ))
 
     def add_tag(self):
-        movie_id = self.select_movie()
+        movie_id = get_integer("Movie ID: ")
         tags = set()
         while True:
             tag = get_tag("Add Tag: [Type / to stop] ")
@@ -151,7 +131,7 @@ class Session:
         self.frontend.add_tag(self.user_id, movie_id, tags)
 
     def remove_tag(self):
-        movie_id = self.select_movie()
+        movie_id = get_integer("Movie ID: ")
         tags = set()
         while True:
             tag = get_tag("Remove Tag: [Type / to stop] ")
@@ -161,11 +141,11 @@ class Session:
         self.frontend.remove_tag(self.user_id, movie_id, tags)
 
     def remove_rating(self):
-        movie_id = self.select_movie()
+        movie_id = get_integer("Movie ID: ")
         self.frontend.delete_rating(self.user_id, movie_id)
 
     def add_rating(self):
-        movie_id = self.select_movie()
+        movie_id = get_integer("Movie ID: ")
         self.own_data = self.frontend.get_user_data(self.user_id)
         rating = get_rating("Rating: ")
         if movie_id in self.own_data["ratings"]:
@@ -193,7 +173,7 @@ class Session:
         self.frontend.add_movie(name, genres)
 
     def get_movie(self):
-        movie_id = self.select_movie()
+        movie_id = get_integer("Movie ID: ")
         movie = self.frontend.get_movie(movie_id)
         if not movie:
             return
@@ -202,7 +182,7 @@ class Session:
         print("-" * len(movie["name"]))
         print("  Genres: ", ", ".join(movie["genres"]))
         print("  Tags:   ", ", ".join(movie["tags"]))
-        print("  Ratings:")
+        print("  Ratings: (%d)" % movie["ratings"]["len"])
         print("      Avg:", movie["ratings"]["avg"] or "-")
         print("      Min:", movie["ratings"]["min"] or "-")
         print("      Max:", movie["ratings"]["max"] or "-")
@@ -224,14 +204,15 @@ class Session:
         if not self.movies or not keys:
             return
 
-        print("Movie                Rating    Tags")
-        print("=====                ======    ====")
+        print("ID      Movie                            Rating  Tags")
+        print("==      =====                            ======  ====")
         for movie_id in sorted(keys):
             rating = "  -   "
             if movie_id in data["ratings"]:
                 rating = format(data["ratings"][movie_id], ">6.2f")
-            print("{0: <17}    {1}    {2}".format(
-                textwrap.shorten(self.movies[movie_id], 17, placeholder='...'),
+            print("{0: <6}  {1: <29}    {2}  {3}".format(
+                movie_id,
+                textwrap.shorten(self.movies[movie_id], 29, placeholder='...'),
                 rating,
                 ', '.join(data["tags"].get(movie_id, [])),
                 ))
