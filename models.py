@@ -31,7 +31,7 @@ class DB:
 
     def delete_rating(self, user_id, movie_id):
         if movie_id in self.ratings[user_id]:
-            del self.ratings[user_id]
+            del self.ratings[user_id][movie_id]
 
     @staticmethod
     def from_data():
@@ -47,14 +47,14 @@ class DB:
             next(tags)
             db = DB()
             for id, title, genres in movies:
-                db.movies[int(id)] = {
+                db.movies[id] = {
                     "name": title,
                     "genres": genres.split('|'),
                 }
             for user_id, movie_id, value, _ in ratings:
-                db.ratings[int(user_id)][int(movie_id)] = float(value)
+                db.ratings[int(user_id)][movie_id] = float(value)
             for user_id, movie_id, tag, _ in tags:
-                db.tags[int(user_id)][int(movie_id)].add(tag)
+                db.tags[int(user_id)][movie_id].add(tag)
             return db
 
 

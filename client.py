@@ -48,7 +48,6 @@ class Session:
     def __init__(self, frontend, user_id):
         self.frontend = frontend
         self.user_id = user_id
-        self.movies  = frontend.list_movies()
         self.own_data = {"ratings": {}, "tags": {}}
 
     def help(self):
@@ -111,6 +110,7 @@ class Session:
                 break
             genres.add(genre)
         movies = self.frontend.search(name, genres)
+        print()
         print("ID      Movie                            Genres")
         print("==      =====                            ======")
         for movie_id, movie in movies.items():
@@ -119,9 +119,10 @@ class Session:
                 textwrap.shorten(movie["name"], 29, placeholder='...'),
                 ', '.join(movie["genres"]),
                 ))
+        print()
 
     def add_tag(self):
-        movie_id = get_integer("Movie ID: ")
+        movie_id = get_tag("Movie ID: ")
         tags = set()
         while True:
             tag = get_tag("Add Tag: [Type / to stop] ")
@@ -131,7 +132,7 @@ class Session:
         self.frontend.add_tag(self.user_id, movie_id, tags)
 
     def remove_tag(self):
-        movie_id = get_integer("Movie ID: ")
+        movie_id = get_tag("Movie ID: ")
         tags = set()
         while True:
             tag = get_tag("Remove Tag: [Type / to stop] ")
@@ -141,11 +142,11 @@ class Session:
         self.frontend.remove_tag(self.user_id, movie_id, tags)
 
     def remove_rating(self):
-        movie_id = get_integer("Movie ID: ")
+        movie_id = get_tag("Movie ID: ")
         self.frontend.delete_rating(self.user_id, movie_id)
 
     def add_rating(self):
-        movie_id = get_integer("Movie ID: ")
+        movie_id = get_tag("Movie ID: ")
         self.own_data = self.frontend.get_user_data(self.user_id)
         rating = get_rating("Rating: ")
         if movie_id in self.own_data["ratings"]:
@@ -155,9 +156,9 @@ class Session:
 
     def create_movie(self):
         name = get_tag("Movie Name: ")
-        self.movies = self.frontend.list_movies(maximal=True)
+        movies = self.frontend.list_movies(maximal=True)
         words = set(name.lower().split())
-        for _, other_name in self.movies.items():
+        for _, other_name in movies.items():
             if similar(words, set(other_name.lower().split())) > 0.5:
                 print("Similar movie found:", name)
                 if get_confirm("Is this the same? [y/n]"):
@@ -173,7 +174,7 @@ class Session:
         self.frontend.add_movie(name, genres)
 
     def get_movie(self):
-        movie_id = get_integer("Movie ID: ")
+        movie_id = get_tag("Movie ID: ")
         movie = self.frontend.get_movie(movie_id)
         if not movie:
             return
@@ -190,7 +191,6 @@ class Session:
 
     def get_user_data(self):
         try:
-            self.movies = self.frontend.list_movies()
             self.own_data = self.frontend.get_user_data(self.user_id)
         except RuntimeError as exc:
             if exc.args[0] == "Cannot retrieve value!":
@@ -201,21 +201,22 @@ class Session:
 
         data = self.own_data
         keys = set(data["ratings"]) | set(data["tags"])
-        if not self.movies or not keys:
+        if not keys:
             return
 
-        print("ID      Movie                            Rating  Tags")
-        print("==      =====                            ======  ====")
+        print()
+        print("ID      Rating  Tags")
+        print("==      ======  ====")
         for movie_id in sorted(keys):
             rating = "  -   "
             if movie_id in data["ratings"]:
                 rating = format(data["ratings"][movie_id], ">6.2f")
-            print("{0: <6}  {1: <29}    {2}  {3}".format(
+            print("{0: <6}  {1}  {2}".format(
                 movie_id,
-                textwrap.shorten(self.movies[movie_id], 29, placeholder='...'),
                 rating,
                 ', '.join(data["tags"].get(movie_id, [])),
                 ))
+        print()
 
 
 def main():
