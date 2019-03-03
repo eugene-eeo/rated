@@ -147,6 +147,14 @@ class Replica:
         return self.ts, self.log
 
     @Pyro4.expose
+    def get_state(self):
+        return self.ts, {
+            "movies": self.db.movies,
+            "ratings": self.db.ratings,
+            "tags": self.db.tags,
+        }
+
+    @Pyro4.expose
     def get_timestamp(self):
         return self.sync_ts
 

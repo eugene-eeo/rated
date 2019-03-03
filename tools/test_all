@@ -1,6 +1,7 @@
 #!/bin/bash
 
-rm log.*
+rm log.*   2> /dev/null
+rm state.* 2> /dev/null
 ids=$(./tools/get_ids)
 
 # do some writes first
@@ -27,5 +28,7 @@ sleep 6
 # wait for replica sync and reconstruction
 sleep 18
 ./tools/get_logs
+./tools/get_states
 ./tools/check_causal_consistency
 ./tools/check_global_consistency
+./tools/check_states

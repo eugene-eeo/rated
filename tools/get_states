@@ -1,0 +1,4 @@
+#!/bin/bash
+for id in $(./tools/get_ids); do
+    python ./tools/get_state.py $id > "state.$id"
+done

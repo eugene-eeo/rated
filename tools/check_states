@@ -1,0 +1,15 @@
+#!/bin/bash
+ids=$(./tools/get_ids)
+
+head=$(echo "$ids" | head -n 1)
+tail=$(echo "$ids" | tail -n +2)
+
+for id in $tail; do
+    if [ "$(diff "state.$head" "state.$id" | head -n 1)" ]; then
+        echo -e "\e[31mFAIL\e[0m"
+        echo "Found mismatched states:"
+        echo $head
+        echo $id
+        exit 1
+    fi
+done
