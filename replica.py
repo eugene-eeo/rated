@@ -44,6 +44,7 @@ class Replica:
         n = 0
         while True:
             n += 1
+            n %= 6
             with self.lock:
                 self.is_online = random() <= 0.75
                 if self.has_new_gossip:
@@ -51,8 +52,8 @@ class Replica:
                     self.has_new_gossip = False
                     self.apply_updates()
                     n = 0
-                # relax 5 rounds and apply a global order to the updates
-                elif n >= 5 and self.need_reconstruct and not self.buffer:
+                # relax and apply a global order to the updates
+                elif n == 5 and self.need_reconstruct and not self.buffer:
                     self.need_reconstruct = False
                     self.reconstruct()
                     n = 0
