@@ -20,23 +20,14 @@ class Replica:
         self.log = []
         self.ts = vc.create()  # timestamp of state
         self.executed = set()
-        self._lock = Lock()
+        self.lock = Lock()
         self.buffer = []
         # gossip
-        self.busy = False
         self.sync_period = 2
         self.sync_ts = vc.create()  # timestamp of replica
         self.has_new_gossip = False
         self.need_reconstruct = False
         self.is_online = True
-
-    @property
-    @contextmanager
-    def lock(self):
-        self.busy = True
-        with self._lock:
-            yield self._lock
-            self.busy = False
 
     def peers(self):
         with self.ns:
@@ -112,24 +103,13 @@ class Replica:
             sleep(self.sync_period)
             guarantee -= 1
 
-    def add_update(self, op, prev):
-        ts = prev.copy()
-        new_sync_ts = vc.increment(self.sync_ts, self.id)
-        ts[self.id] = new_sync_ts[self.id]
-        # commit update immediately if possible
-        self.buffer.append(Entry(generate_id(10), op, prev, ts, time()))
-        self.apply_updates()
-        self.need_reconstruct = True
-        self.sync_ts = new_sync_ts
-        return ts
-
     # exposed methods
 
     @Pyro4.expose
     def status(self):
         if not self.is_online:
             return 'offline'
-        if self.busy or random() <= 0.25:
+        if random() <= 0.25:
             return 'overloaded'
         return 'online'
 
@@ -207,7 +187,15 @@ class Replica:
     @Pyro4.expose
     def update(self, raw, ts):
         with self.lock:
-            return self.add_update(update_from_raw(raw), ts)
+            prev = ts.copy()
+            new_sync_ts = vc.increment(self.sync_ts, self.id)
+            ts[self.id] = new_sync_ts[self.id]
+            self.buffer.append(Entry(generate_id(), update_from_raw(raw), prev, ts, time()))
+            # commit update immediately if possible
+            self.apply_updates()
+            self.need_reconstruct = True
+            self.sync_ts = new_sync_ts
+            return ts
 
 
 if __name__ == '__main__':
