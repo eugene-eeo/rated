@@ -38,6 +38,16 @@ def ignore_disconnects():
         pass
 
 
+@contextmanager
+def ignore_status_errors():
+    try:
+        yield
+    except RuntimeError as exc:
+        if exc.args[0] == 'replica offline':
+            return
+        raise
+
+
 def sort_buffer(buffer):
     buffer.sort(key=attrgetter("time", "id"))
 

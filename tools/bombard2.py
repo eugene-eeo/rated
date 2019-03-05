@@ -3,7 +3,7 @@ fr = Proxy(locateNS().lookup("frontend"))
 for _ in range(100):
     while True:
         try:
-            fr.add_rating(1, 1, 0)
+            fr.add_rating(1, '1', 0)
             break
         except RuntimeError:
             pass

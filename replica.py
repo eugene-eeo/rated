@@ -7,7 +7,7 @@ from random import random
 import Pyro4
 from models import Entry, update_from_raw, DB
 from threading import Lock, Thread
-from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, unregister_at_exit
+from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, unregister_at_exit, ignore_status_errors
 import vector_clock as vc
 
 
@@ -58,26 +58,30 @@ class Replica:
                     self.reconstruct()
                     n = 0
             sleep(self.sync_period)
-            logs = []
+            # if we're not online, don't gossip!
+            if not self.is_online:
+                continue
+            # find 5 random peers and gossip to them,
+            # if possible
             for peer in islice(self.peers(), 5):
-                with ignore_disconnects():
+                with ignore_disconnects(), ignore_status_errors():
+                    events = []
+                    ts = {}
                     t = peer.get_timestamp()
                     with self.lock:
-                        if t == self.sync_ts:
+                        ts = self.sync_ts
+                        if t == ts:
                             continue
                         # check if we need to go back past the checkpoint
-                        log = (
-                            self.buffer if vc.greater_than(t, self.ts) else
-                            chain(self.log, self.buffer)
-                            )
+                        log = self.buffer
+                        if not vc.greater_than(t, self.ts):
+                            log = chain(self.log, self.buffer)
                         # get all events which are concurrent or greater than
                         events = [e.to_raw() for e in log if vc.compare(e.ts, t) >= 0]
-                        logs.append((peer, self.sync_ts, events))
-            # now send events
-            for peer, ts, log in logs:
-                with peer, ignore_disconnects():
-                    if log:
-                        peer.sync(log, ts)
+                        if not events:
+                            continue
+                    # gossip with peer
+                    peer.sync(events, ts)
 
     def reconstruct(self):
         self.ts = {}
@@ -104,6 +108,10 @@ class Replica:
             sleep(self.sync_period)
             guarantee -= 1
 
+    def check_status(self):
+        if not self.is_online:
+            raise RuntimeError("replica offline")
+
     # exposed methods
 
     @Pyro4.expose
@@ -113,13 +121,6 @@ class Replica:
         if random() <= 0.25:
             return 'overloaded'
         return 'online'
-
-    @Pyro4.expose
-    def sync(self, log, ts):
-        with self.lock:
-            self.sync_ts = vc.merge(self.sync_ts, ts)
-            self.buffer.extend(Entry.from_raw(u) for u in log)
-            self.has_new_gossip = True
 
     @Pyro4.expose
     def get_log(self):
@@ -135,16 +136,27 @@ class Replica:
 
     @Pyro4.expose
     def get_timestamp(self):
+        self.check_status()
         return self.sync_ts
 
     @Pyro4.expose
+    def sync(self, log, ts):
+        self.check_status()
+        with self.lock:
+            self.sync_ts = vc.merge(self.sync_ts, ts)
+            self.buffer.extend(Entry.from_raw(u) for u in log)
+            self.has_new_gossip = True
+
+    @Pyro4.expose
     def list_movies(self, ts):
+        self.check_status()
         with self.spin(ts):
             data = {id: movie["name"] for id, movie in self.db.movies.items()}
             return data, self.ts
 
     @Pyro4.expose
     def search(self, name, genres, ts):
+        self.check_status()
         with self.spin(ts):
             results = {}
             genres = set(genres)
@@ -155,6 +167,7 @@ class Replica:
 
     @Pyro4.expose
     def get_movie(self, movie_id, ts):
+        self.check_status()
         with self.spin(ts):
             if movie_id not in self.db.movies:
                 return None, self.ts
@@ -178,6 +191,7 @@ class Replica:
 
     @Pyro4.expose
     def get(self, user_id, ts):
+        self.check_status()
         with self.spin(ts):
             data = {
                 "ratings": self.db.ratings[user_id],
@@ -187,6 +201,7 @@ class Replica:
 
     @Pyro4.expose
     def update(self, raw, ts):
+        self.check_status()
         with self.lock:
             prev = ts.copy()
             new_sync_ts = vc.increment(self.sync_ts, self.id)

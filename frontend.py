@@ -4,7 +4,7 @@ import random
 from queue import Queue
 from threading import Lock, Thread
 from vector_clock import merge, create
-from utils import ignore_disconnects, unregister_at_exit, generate_id
+from utils import ignore_disconnects, unregister_at_exit, generate_id, ignore_status_errors
 from models import AddTag, RemoveTag, Delete, Update, UpdateMovie
 
 
@@ -31,23 +31,23 @@ class Frontend:
         with self.ns:
             return list(self.ns.list(metadata_all={"replica"}).values())
 
-    @property
-    def replica(self):
-        # try to get primary
-        with ignore_disconnects():
-            if self._replica is not None and self._replica.status() == 'online':
-                return self._replica
-        for _ in range(3):
-            # try random replicas
+    def replicas(self, patience=3):
+        # try to give our previous replica if we can
+        with ignore_disconnects(), ignore_status_errors():
+            if self._replica and self._replica.status() == 'online':
+                yield self._replica
+        # otherwise we try to find random replicas that are online
+        for _ in range(patience):
             uris = self.list_replicas()
             random.shuffle(uris)
             for uri in uris:
-                with ignore_disconnects():
+                with ignore_disconnects(), ignore_status_errors():
                     replica = Pyro4.Proxy(uri)
                     if replica.status() == 'online':
                         self._replica = replica
-                        return self._replica
+                        yield self._replica
             time.sleep(0.05)
+        # no replicas => raise exception
         raise RuntimeError("No replica available")
 
     @Pyro4.expose
@@ -72,14 +72,20 @@ class Frontend:
         if max:
             with self.lock:
                 dep = Frontend.max_ts
-        ts = self.replica.update(update.to_raw(), dep)
-        self.update_ts(ts)
+        for replica in self.replicas():
+            # send the update to the first replica we find;
+            # if the replica goes offline here then we try
+            # the next replica.
+            ts = replica.update(update.to_raw(), dep)
+            self.update_ts(ts)
+            return
 
     @Pyro4.expose
     def get_user_data(self, user_id):
-        data, ts = self.replica.get(user_id, self.ts)
-        self.update_ts(ts)
-        return data
+        for replica in self.replicas():
+            data, ts = replica.get(user_id, self.ts)
+            self.update_ts(ts)
+            return data
 
     @Pyro4.expose
     def list_movies(self, maximal=False):
@@ -87,21 +93,24 @@ class Frontend:
         if maximal:
             with self.lock:
                 dep = Frontend.max_ts
-        data, ts = self.replica.list_movies(dep)
-        self.update_ts(ts)
-        return data
+        for replica in self.replicas():
+            data, ts = replica.list_movies(dep)
+            self.update_ts(ts)
+            return data
 
     @Pyro4.expose
     def search(self, name, genres):
-        data, ts = self.replica.search(name, genres, self.ts)
-        self.update_ts(ts)
-        return data
+        for replica in self.replicas():
+            data, ts = replica.search(name, genres, self.ts)
+            self.update_ts(ts)
+            return data
 
     @Pyro4.expose
     def get_movie(self, movie_id):
-        data, ts = self.replica.get_movie(movie_id, self.ts)
-        self.update_ts(ts)
-        return data
+        for replica in self.replicas():
+            data, ts = replica.get_movie(movie_id, self.ts)
+            self.update_ts(ts)
+            return data
 
     @Pyro4.expose
     def add_rating(self, user_id, movie_id, value):
