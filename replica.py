@@ -1,13 +1,11 @@
 import sys
-import os
-import signal
 from time import sleep, time
 from itertools import chain, islice
 from contextlib import contextmanager
 from random import random
 
 import Pyro4
-from models import *
+from models import Entry, update_from_raw, DB
 from threading import Lock, Thread
 from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, unregister_at_exit
 import vector_clock as vc
@@ -20,14 +18,14 @@ class Replica:
         # state and updates
         self.db = DB.from_data()
         self.log = []
-        self.ts = vc.create() # timestamp of state
+        self.ts = vc.create()  # timestamp of state
         self.executed = set()
         self._lock = Lock()
         self.buffer = []
         # gossip
         self.busy = False
         self.sync_period = 2
-        self.sync_ts = vc.create() # timestamp of replica
+        self.sync_ts = vc.create()  # timestamp of replica
         self.has_new_gossip = False
         self.need_reconstruct = False
         self.is_online = True
@@ -189,9 +187,8 @@ class Replica:
 
             # compile ratings
             ratings = [r[movie_id] for r in self.db.ratings.values() if movie_id in r]
-            avg = lambda r: (sum(r) / len(r))
             data["ratings"] = {
-                "avg": avg(ratings) if ratings else None,
+                "avg": sum(ratings) / len(ratings) if ratings else None,
                 "min": min(ratings) if ratings else None,
                 "max": max(ratings) if ratings else None,
                 "len": len(ratings),

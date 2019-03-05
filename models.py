@@ -76,9 +76,10 @@ def update_from_raw(raw):
 def register(tag):
     def decorator(cls):
         REGISTRY[tag] = cls
-        def func(self):
+
+        def to_raw(self):
             return (tag, self)
-        cls.to_raw = func
+        cls.to_raw = to_raw
         return cls
     return decorator
 
