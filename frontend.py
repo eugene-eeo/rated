@@ -67,18 +67,48 @@ class Frontend:
         self.ts = merge(ts, self.ts)
         self.queue.put_nowait(self.ts)
 
+    def forced_update(self, update):
+        with self.lock:
+            dep = Frontend.max_ts
+        uid = generate_id()
+        uris = self.list_replicas()
+        sent = set()
+        majority = (len(uris) // 2) + 1
+        for _ in range(5):
+            # 2PC: majority should accept update
+            for uri in set(uris) - sent:
+                with ignore_status_errors():
+                    replica = Pyro4.Proxy(uri)
+                    replica.accept_update(uid, update.to_raw(), dep)
+                    sent.add(uri)
+            if len(sent) >= majority:
+                break
+            time.sleep(0.05)
+        # make sure that we reach majority
+        if len(sent) < majority:
+            raise RuntimeError("cannot perform update")
+        # commit
+        ts = None
+        while sent:
+            with ignore_status_errors():
+                for uri in list(sent):
+                    replica = Pyro4.Proxy(uri)
+                    ts = replica.commit_update(uid)
+                    sent.discard(uri)
+            time.sleep(0.05)
+        self.update_ts(ts)
+
     def send_update(self, update, max=False):
-        dep = self.ts
         if max:
-            with self.lock:
-                dep = Frontend.max_ts
+            self.forced_update(update)
+            return
         for replica in self.replicas():
             # send the update to the first replica we find;
             # if the replica goes offline here then we try
             # the next replica.
-            ts = replica.update(update.to_raw(), dep)
+            ts = replica.update(update.to_raw(), self.ts)
             self.update_ts(ts)
-            return
+            break
 
     @Pyro4.expose
     def get_user_data(self, user_id):

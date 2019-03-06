@@ -58,14 +58,14 @@ class DB:
             return db
 
 
-class Entry(namedtuple('Entry', 'id,op,prev,ts,time')):
+class Entry(namedtuple('Entry', 'id,node_id,op,prev,ts,time')):
     def to_raw(self):
-        return (self.id, self.op.to_raw(), self.prev, self.ts, self.time)
+        return (self.id, self.node_id, self.op.to_raw(), self.prev, self.ts, self.time)
 
     @classmethod
     def from_raw(cls, t):
         e = Entry(*t)
-        return Entry(e.id, update_from_raw(e.op), e.prev, e.ts, e.time)
+        return Entry(e.id, e.node_id, update_from_raw(e.op), e.prev, e.ts, e.time)
 
 
 def update_from_raw(raw):

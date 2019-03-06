@@ -62,6 +62,9 @@ class Session:
         print(" [AT] Add Tag")
         print(" [RT] Remove Tag")
         print()
+        print(" [URM] Unkill Replica Manager")
+        print(" [KRM] Kill Replica Manager")
+        print()
         print(" [Q]  Quit")
         print(" [?]  Help")
         print()
@@ -83,6 +86,8 @@ class Session:
                 elif option == "rr": self.remove_rating()
                 elif option == "at": self.add_tag()
                 elif option == "rt": self.remove_tag()
+                elif option == "urm": self.unkill_replica_manager()
+                elif option == "krm": self.kill_replica_manager()
                 elif option == "?": self.help()
                 elif option == "q": break
             except RuntimeError as exc:
@@ -100,6 +105,24 @@ class Session:
                     print(" [!] Error: Cannot reconnect.")
                     print(" [!] Bye.")
                     exit(1)
+
+    def select_replica(self):
+        replicas = Pyro4.locateNS().list(metadata_all={"replica"})
+        keys = list(sorted(replicas))
+        for i, key in enumerate(keys, 1):
+            print(" [%d] %s" % (i, key))
+        while True:
+            i = get_integer("Selection: ") - 1
+            if 0 <= i < len(keys):
+                return Pyro4.Proxy(replicas[keys[i]])
+
+    def unkill_replica_manager(self):
+        with self.select_replica() as p:
+            p.set_forced_offline(False)
+
+    def kill_replica_manager(self):
+        with self.select_replica() as p:
+            p.set_forced_offline(True)
 
     def search_movie(self):
         name   = input("Name: ").strip()

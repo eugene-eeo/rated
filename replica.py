@@ -19,15 +19,19 @@ class Replica:
         self.db = DB.from_data()
         self.log = []
         self.ts = vc.create()  # timestamp of state
-        self.executed = set()
+        self.executed_ids = set()
+        self.executed_uids = set()
         self.lock = Lock()
         self.buffer = []
+        # tentative = waiting for confirmation from frontend
+        self.tentative = {}
         # gossip
         self.sync_period = 2
         self.sync_ts = vc.create()  # timestamp of replica
         self.has_new_gossip = False
         self.need_reconstruct = False
         self.is_online = True
+        self.forced_offline = False
 
     def peers(self):
         with self.ns:
@@ -86,13 +90,16 @@ class Replica:
     def reconstruct(self):
         self.ts = {}
         self.db = DB.from_data()
-        self.executed.clear()
+        self.executed_ids.clear()
+        self.executed_uids.clear()
         self.log, self.buffer = [], self.log
         self.apply_updates()
 
     def apply_updates(self):
         sort_buffer(self.buffer)
-        self.ts, self.buffer = apply_updates(self.ts, self.db, self.executed,
+        self.ts, self.buffer = apply_updates(self.ts, self.db,
+                                             self.executed_ids,
+                                             self.executed_uids,
                                              self.log, self.buffer)
 
     @contextmanager
@@ -109,14 +116,30 @@ class Replica:
             guarantee -= 1
 
     def check_status(self):
-        if not self.is_online:
+        if self.forced_offline or not self.is_online:
             raise RuntimeError("replica offline")
+
+    def add_update(self, update, prev, id=None):
+        id = id or generate_id()
+        ts = prev.copy()
+        new_sync_ts = vc.increment(self.sync_ts, self.id)
+        ts[self.id] = new_sync_ts[self.id]
+        self.buffer.append(Entry(id, self.id, update, prev, ts, time()))
+        # apply immediately if possible
+        self.apply_updates()
+        self.need_reconstruct = True
+        self.sync_ts = new_sync_ts
+        return ts
 
     # exposed methods
 
     @Pyro4.expose
+    def set_forced_offline(self, s):
+        self.forced_offline = s
+
+    @Pyro4.expose
     def status(self):
-        if not self.is_online:
+        if self.forced_offline or not self.is_online:
             return 'offline'
         if random() <= 0.25:
             return 'overloaded'
@@ -203,15 +226,19 @@ class Replica:
     def update(self, raw, ts):
         self.check_status()
         with self.lock:
-            prev = ts.copy()
-            new_sync_ts = vc.increment(self.sync_ts, self.id)
-            ts[self.id] = new_sync_ts[self.id]
-            self.buffer.append(Entry(generate_id(), update_from_raw(raw), prev, ts, time()))
-            # commit update immediately if possible
-            self.apply_updates()
-            self.need_reconstruct = True
-            self.sync_ts = new_sync_ts
-            return ts
+            return self.add_update(update_from_raw(raw), ts)
+
+    @Pyro4.expose
+    def commit_update(self, id):
+        self.check_status()
+        with self.lock:
+            update, ts = self.tentative.pop(id)
+            return self.add_update(update, ts, id)
+
+    @Pyro4.expose
+    def accept_update(self, id, raw, ts):
+        self.check_status()
+        self.tentative[id] = (update_from_raw(raw), ts)
 
 
 if __name__ == '__main__':

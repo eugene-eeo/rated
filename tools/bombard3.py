@@ -1,10 +1,10 @@
 import Pyro4
 
 fr = Pyro4.Proxy(Pyro4.locateNS().lookup("frontend"))
-for i in range(100):
+for i in range(10):
     while True:
         try:
-            fr.delete_rating(1, '2')
+            fr.add_movie('abc', {'abc', 'def'})
             break
         except RuntimeError:
             pass

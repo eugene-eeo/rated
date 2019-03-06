@@ -30,7 +30,7 @@ for file in glob.glob('log.*'):
             # ts >= u.prev
             assert compare(ts, entry["prev"]) > -1
             # not executed twice
-            assert entry["id"] not in seen
+            assert (entry["id"], entry["uid"]) not in seen
 
             merge(ts, entry["ts"])
-            seen.add(entry["id"])
+            seen.add((entry["id"], entry["uid"]))

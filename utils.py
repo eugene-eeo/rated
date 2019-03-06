@@ -52,22 +52,33 @@ def sort_buffer(buffer):
     buffer.sort(key=attrgetter("time", "id"))
 
 
-def apply_updates(ts, db, executed, log, buffer):
+def apply_updates(ts, db, executed_ids, executed_uids, log, buffer):
     has_event = True
     while has_event:
         has_event = False
         next_buff = []
         for e in buffer:
-            # we've seen this value before, throw away!
-            if e.id in executed:
+            # we've seen this value before, don't execute
+            # but merge the timestamps
+            if e.id in executed_ids:
+                ts = vc.merge(ts, e.ts)
+                if (e.id, e.node_id) not in executed_uids:
+                    # we've seen our copy (or some copy) of
+                    # this update before, so just pretend we've
+                    # executed it and put it in the log
+                    log.append(e)
+                    executed_uids.add((e.id, e.node_id))
                 continue
+            # if we can apply this update
             if vc.geq(ts, e.prev):
                 has_event = True
                 e.op.apply(db)
                 ts = vc.merge(ts, e.ts)
-                executed.add(e.id)
+                executed_ids.add(e.id)
+                executed_uids.add((e.id, e.node_id))
                 log.append(e)
                 continue
+            # otherwise we put it in the next buffer
             next_buff.append(e)
         buffer = next_buff
     return ts, buffer
