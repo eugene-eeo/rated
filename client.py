@@ -179,7 +179,7 @@ class Session:
 
     def create_movie(self):
         name = get_tag("Movie Name: ")
-        movies = self.frontend.list_movies(maximal=True)
+        movies = self.frontend.list_movies()
         words = set(name.lower().split())
         for _, other_name in movies.items():
             if similar(words, set(other_name.lower().split())) > 0.5:
@@ -194,7 +194,10 @@ class Session:
                 break
             genres.add(g)
 
-        self.frontend.add_movie(name, genres)
+        id = self.frontend.add_movie(name, genres)
+        print()
+        print("Movie created with ID:", id)
+        print()
 
     def get_movie(self):
         movie_id = get_tag("Movie ID: ")

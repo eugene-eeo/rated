@@ -2,15 +2,14 @@ import csv
 from collections import namedtuple, defaultdict
 
 
-__all__ = ('DB', 'Entry', 'update_from_raw')
 REGISTRY = {}
 
 
 class DB:
     def __init__(self):
-        self.movies  = {}
+        self.movies = {}
         self.ratings = defaultdict(lambda: defaultdict(int))
-        self.tags    = defaultdict(lambda: defaultdict(set))
+        self.tags = defaultdict(lambda: defaultdict(set))
 
     def clear(self):
         self.movies.clear()
@@ -39,8 +38,8 @@ class DB:
                 open('data/movies.csv', newline='') as movies, \
                 open('data/tags.csv', newline='') as tags:
             ratings = csv.reader(ratings)
-            movies  = csv.reader(movies)
-            tags    = csv.reader(tags)
+            movies = csv.reader(movies)
+            tags = csv.reader(tags)
             # skip headers
             next(ratings)
             next(movies)
@@ -58,6 +57,14 @@ class DB:
             return db
 
 
+# Entry => some 'update' operation sent to a replica
+# contains the entry ID, node ID, operation, causal dependency, logical
+# timestamp, and physical timestamp
+#
+# We don't need `time` to establish a strict ordering, but
+# using `time` is better than using `id` or `node_id` to avoid
+# the entries from jumping around too much.
+#
 class Entry(namedtuple('Entry', 'id,node_id,op,prev,ts,time')):
     def to_raw(self):
         return (self.id, self.node_id, self.op.to_raw(), self.prev, self.ts, self.time)
@@ -65,10 +72,10 @@ class Entry(namedtuple('Entry', 'id,node_id,op,prev,ts,time')):
     @classmethod
     def from_raw(cls, t):
         e = Entry(*t)
-        return Entry(e.id, e.node_id, update_from_raw(e.op), e.prev, e.ts, e.time)
+        return Entry(e.id, e.node_id, op_from_raw(e.op), e.prev, e.ts, e.time)
 
 
-def update_from_raw(raw):
+def op_from_raw(raw):
     op, params = raw
     return REGISTRY[op](*params)
 

@@ -5,9 +5,10 @@ from contextlib import contextmanager
 from random import random
 
 import Pyro4
-from models import Entry, update_from_raw, DB
+from models import Entry, op_from_raw, DB
 from threading import Lock, Thread
-from utils import generate_id, find_random_peers, ignore_disconnects, apply_updates, sort_buffer, unregister_at_exit, ignore_status_errors
+from utils import generate_id, find_random_peers, ignore_disconnects, \
+        apply_updates, sort_buffer, unregister_at_exit, ignore_status_errors
 import vector_clock as vc
 
 
@@ -15,21 +16,21 @@ class Replica:
     def __init__(self, id):
         self.id = id
         self.ns = Pyro4.locateNS()
+        self.lock = Lock()
         # state and updates
         self.db = DB.from_data()
-        self.log = []
+        self.log = []  # applied updates
+        self.buffer = []  # unapplied updates
         self.ts = vc.create()  # timestamp of state
         self.executed_ids = set()
         self.executed_uids = set()
-        self.lock = Lock()
-        self.buffer = []
-        # tentative = waiting for confirmation from frontend
-        self.tentative = {}
+        self.tentative = {}  # waiting for confirmation from frontend
         # gossip
         self.sync_period = 2
-        self.sync_ts = vc.create()  # timestamp of replica
+        self.sync_ts = vc.create()  # timestamp of log + buffer
         self.has_new_gossip = False
         self.need_reconstruct = False
+        # status
         self.is_online = True
         self.forced_offline = False
 
@@ -63,10 +64,9 @@ class Replica:
                     n = 0
             sleep(self.sync_period)
             # if we're not online, don't gossip!
-            if not self.is_online:
+            if not self.is_online or self.forced_offline:
                 continue
-            # find 5 random peers and gossip to them,
-            # if possible
+            # find 5 random peers and gossip to them, if possible
             for peer in islice(self.peers(), 5):
                 with ignore_disconnects(), ignore_status_errors():
                     events = []
@@ -103,29 +103,36 @@ class Replica:
                                              self.log, self.buffer)
 
     @contextmanager
-    def spin(self, ts, guarantee=10):
+    def spin(self, ts, patience=10):
+        # wait until we can respond to the query, or until
+        # we run out of patience
         while True:
             with self.lock:
                 # can respond
                 if vc.geq(self.ts, ts):
                     yield
                     return
-                if guarantee == 0:
-                    raise RuntimeError("Cannot retrieve value!")
+            patience -= 1
+            if patience == 0:
+                raise RuntimeError("Cannot retrieve value!")
             sleep(self.sync_period)
-            guarantee -= 1
 
     def check_status(self):
         if self.forced_offline or not self.is_online:
             raise RuntimeError("replica offline")
 
-    def add_update(self, update, prev, id=None):
+    def add_update(self, op, prev, id=None):
+        # op = some op object
+        # prev = v.c. of causal dependency
+        #
+        # generate an update-id if necessary, otherwise we are given one from
+        # the frontend in the case of a 2PC/forced update
         id = id or generate_id()
         ts = prev.copy()
         new_sync_ts = vc.increment(self.sync_ts, self.id)
         ts[self.id] = new_sync_ts[self.id]
-        self.buffer.append(Entry(id, self.id, update, prev, ts, time()))
-        # apply immediately if possible
+        self.buffer.append(Entry(id, self.id, op, prev, ts, time()))
+        # try to apply update immediately
         self.apply_updates()
         self.need_reconstruct = True
         self.sync_ts = new_sync_ts
@@ -141,16 +148,20 @@ class Replica:
     def status(self):
         if self.forced_offline or not self.is_online:
             return 'offline'
+        # overloaded => frontend won't choose us for sending updates
+        # or querying from, but we will still respond.
         if random() <= 0.25:
             return 'overloaded'
         return 'online'
 
     @Pyro4.expose
     def get_log(self):
+        # used for testing
         return self.ts, self.log
 
     @Pyro4.expose
     def get_state(self):
+        # used for testing
         return self.ts, {
             "movies": self.db.movies,
             "ratings": self.db.ratings,
@@ -164,6 +175,9 @@ class Replica:
 
     @Pyro4.expose
     def sync(self, log, ts):
+        # called by other peers when they have updates to send to us
+        # we extend our list of unapplied updates and update our
+        # replica timestamp
         self.check_status()
         with self.lock:
             self.sync_ts = vc.merge(self.sync_ts, ts)
@@ -226,7 +240,7 @@ class Replica:
     def update(self, raw, ts):
         self.check_status()
         with self.lock:
-            return self.add_update(update_from_raw(raw), ts)
+            return self.add_update(op_from_raw(raw), ts)
 
     @Pyro4.expose
     def commit_update(self, id):
@@ -237,8 +251,11 @@ class Replica:
 
     @Pyro4.expose
     def accept_update(self, id, raw, ts):
+        # just put the (update, ts) pair in the tentative update "log"
+        # and wait for commit_update() from the frontend.
+        # no locking required here.
         self.check_status()
-        self.tentative[id] = (update_from_raw(raw), ts)
+        self.tentative[id] = (op_from_raw(raw), ts)
 
 
 if __name__ == '__main__':
