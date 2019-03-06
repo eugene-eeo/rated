@@ -159,10 +159,6 @@ class Frontend:
         self.send_update(RemoveTag(user_id, movie_id, tag))
 
     @Pyro4.expose
-    def update_movie(self, movie_id, name, genres):
-        self.send_update(UpdateMovie(movie_id, {"name": name, "genres": genres}), max=True)
-
-    @Pyro4.expose
     def add_movie(self, name, genres):
         id = generate_id(5)
         self.send_update(UpdateMovie(id, {"name": name, "genres": genres}), max=True)
