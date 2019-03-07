@@ -3,11 +3,15 @@ Running
 
 Linux, Python 3.7.0:
 
-  $ chmod +x ./spawn.sh
   # replace 3 by the number of replicas you want
-  $ ./spawn.sh 3
+  $ source spawn.sh
   # to add more replicas
   $ python replica.py &
+  # to kill the cluster
+  $ kill $(jobs -p)
+
+  # to run tests:
+  $ tools/test_all
 
   # in another terminal
   $ python client.py
@@ -23,15 +27,18 @@ Users can CRUD their own ratings and tags, search for movies (by name and or gen
 and create movies. All operations are causally ordered using vector clocks. At all
 times, all replicas are causally consistent -- replicas only execute an update when:
 
-    1) the causal dependencies are met
-    2) it hasn't seen the update ID before;
+    1. the causal dependencies are met
+    2. it hasn't seen the update ID before;
            if it has seen the update ID, the replica simply updates
            the timestamp of it's value.
 
 By design, all operations 'succeed' when a replica receives and acknowledges the update.
 However creating movies is more fault tolerant than other operations - the frontend
 will execute a 2PC protocol to ensure that a majority of replicas acknowledge the
-update.
+update. Every 2 seconds, replicas will gossip and change their status as follows:
+
+    1. 0.25 chance of going offline
+    2. otherwise, 0.25 chance of being overloaded
 
 Over time, all replicas will converge to a global order by periodically sorting their
 update logs and reapplying them on a fresh state. We establish a total order on updates

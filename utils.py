@@ -59,13 +59,12 @@ def apply_updates(ts, db, executed_ids, executed_uids, log, buffer):
         next_buff = []
         for e in buffer:
             # we've seen this value before, don't execute
-            # but merge the timestamps
             if e.id in executed_ids:
-                ts = vc.merge(ts, e.ts)
                 if (e.id, e.node_id) not in executed_uids:
                     # we've seen our copy (or some copy) of
                     # this update before, so just pretend we've
                     # executed it and put it in the log
+                    ts = vc.merge(ts, e.ts)
                     log.append(e)
                     executed_uids.add((e.id, e.node_id))
                 continue

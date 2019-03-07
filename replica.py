@@ -76,7 +76,7 @@ class Replica:
                         ts = self.sync_ts
                         if t == ts:
                             continue
-                        # check if we need to go back past the checkpoint
+                        # check if we need to go back past our buffered updates
                         log = self.buffer
                         if not vc.greater_than(t, self.ts):
                             log = chain(self.log, self.buffer)
