@@ -1,0 +1,2 @@
+#!/bin/bash
+pyro4-nsc list | grep '^replica:' | cut -d ' ' -f1 | cut -d ':' -f2

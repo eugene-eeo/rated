@@ -1,0 +1,4 @@
+#!/bin/bash
+for id in $(./tools/get_ids); do
+    python ./tools/get_log.py $id > "log.$id"
+done
